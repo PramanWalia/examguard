@@ -1,0 +1,29 @@
+{
+  "name": "examguard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ExamGuard online examination platform",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "build": "npm run build --workspace client",
+    "lint": "npm run lint --workspaces",
+    "format": "npm run format --workspaces",
+    "test": "npm run test --workspace server"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "msw": {
+    "workerDirectory": [
+      "client\\public"
+    ]
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
+  }
+}

@@ -1,0 +1,2 @@
+import { Link } from 'react-router-dom';
+export const NotFoundPage = () => <main className="grid min-h-screen place-items-center bg-slate-50 p-6 dark:bg-slate-950"><section className="text-center"><h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Page not found</h1><p className="mt-2 text-slate-600 dark:text-slate-300">The page you requested does not exist.</p><Link className="mt-5 inline-block font-medium text-brand-600 underline focus:outline-none focus:ring-2 focus:ring-brand-500" to="/dashboard">Go to dashboard</Link></section></main>;
