@@ -68,8 +68,8 @@ flowchart LR
 ### Install
 
 ```powershell
-git clone <repository-url>
-cd rip1
+git clone https://github.com/PramanWalia/examguard.git
+cd examguard
 npm install
 ```
 
