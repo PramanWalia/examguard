@@ -1,158 +1,388 @@
-# ExamGuard
+<div align="center">
 
-ExamGuard is a full-stack online examination platform for teachers, students, and administrators. It combines exam authoring, question-bank management, timed attempts, autosave, grading, analytics, and browser-based integrity signals behind a contract-first Express API and a responsive React client. The project is designed to demonstrate production-minded engineering decisions: the server remains authoritative for time and state, submissions are idempotent, published exams are immutable snapshots, and persistence is isolated behind repositories that can use either in-memory or MongoDB implementations.
+# 🛡️ ExamGuard
 
-## Demo
+**A secure, full-stack online examination platform**
 
-- **Local demo:** [http://localhost:5173](http://localhost:5173) after following the setup steps below.
-- **Hosted demo:** No public deployment is configured in this repository yet. Replace this section with the deployment URL when one is available.
-- **Demo credentials:** Permanent credentials are intentionally not committed. For an isolated local demo, enable fixture seeding with `SEED_ON_START=true`, or provision temporary accounts with `npm run create-admin --workspace server`. Never publish production administrator credentials.
+Built with React · Express · MongoDB
 
-## Features
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-7%2B-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![License](https://img.shields.io/badge/License-Private-red)](#)
 
-- Role-based workflows for students, teachers, and administrators.
-- Teacher question-bank CRUD, filtering, search, pagination, CSV/XLSX import, and soft deletion.
-- Draft exam builder with question ordering, marks, timing, batches, join codes, and publish validation.
-- Published-exam schedule editing and teacher-owned exam deletion.
-- Student exam discovery, code joining, timed attempts, resume support, and result release controls.
-- Server-side grading for single-choice, multi-choice, and numeric questions, including negative and partial marking.
-- Autosaved answers with stale-update protection and a five-second in-flight grace window.
-- Browser integrity signals such as tab changes, window blur, fullscreen exit, copy/paste, context-menu, and shortcut events.
-- Teacher monitoring with violation counts and capped event history.
-- Refresh-token rotation, token-version invalidation, bcrypt password hashing, rate limiting, Helmet, CORS allowlisting, and request validation.
-- MongoDB persistence with repository contracts and an in-memory implementation for fast tests and development.
+</div>
 
-## Architecture
+---
+
+## 📖 What is ExamGuard?
+
+ExamGuard is an online exam platform where **teachers** create and manage exams, **students** take timed tests with autosave, and **admins** oversee the entire system. It features real-time browser integrity monitoring, automated grading, and detailed analytics — all powered by a secure REST API.
+
+> **Think of it as:** Google Forms for exams, but with built-in proctoring signals, a countdown timer, auto-grading, and role-based dashboards.
+
+---
+
+## ✨ Features at a Glance
+
+<table>
+<tr>
+<td width="50%">
+
+### 👨‍🏫 For Teachers
+- Create & manage a **question bank** (single-choice, multi-choice, numeric)
+- **Import questions** from CSV/XLSX files
+- Build exams with **drag-and-drop** question ordering
+- Set **marks, negative marking, time limits, and batches**
+- **Monitor live exams** — see violation counts in real-time
+- View **analytics** with score distributions and charts
+
+</td>
+<td width="50%">
+
+### 👨‍🎓 For Students
+- Discover exams or join with a **code**
+- Take exams with a **live countdown timer**
+- Answers **auto-save** every few seconds
+- **Resume** interrupted attempts seamlessly
+- View released **results and scores**
+- **Dark mode** support
+
+</td>
+</tr>
+<tr>
+<td colspan="2">
+
+### 🔐 Security & Integrity
+- **Browser monitoring:** Detects tab switches, window blur, fullscreen exit, copy/paste, right-click, and keyboard shortcuts
+- **Server-authoritative time:** The server controls all timing — browser clocks can't be manipulated
+- **JWT authentication** with refresh-token rotation and version-based invalidation
+- **Rate limiting, Helmet, CORS,** and bcrypt password hashing
+- **Idempotent submissions:** Submitting twice won't grade twice
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🖼️ Screenshots
+
+<details>
+<summary><strong>🖥️ Desktop Views</strong> (click to expand)</summary>
+<br/>
+
+| Login | Student Dashboard | Exam Attempt |
+|:---:|:---:|:---:|
+| ![Login](screenshots/desktop-chrome/login-normal.png) | ![Student Dashboard](screenshots/desktop-chrome/student-dashboard-normal.png) | ![Attempt](screenshots/desktop-chrome/student-attempt-active.png) |
+
+| Teacher Dashboard | Exam Builder | Live Monitor |
+|:---:|:---:|:---:|
+| ![Teacher Dashboard](screenshots/desktop-chrome/teacher-dashboard-normal.png) | ![Exam Builder](screenshots/desktop-chrome/exam-builder-step1.png) | ![Monitor](screenshots/desktop-chrome/teacher-monitor-normal.png) |
+
+| Admin Dashboard | Questions List | Register |
+|:---:|:---:|:---:|
+| ![Admin Dashboard](screenshots/desktop-chrome/admin-dashboard-normal.png) | ![Questions](screenshots/desktop-chrome/questions-list-normal.png) | ![Register](screenshots/desktop-chrome/register-normal.png) |
+
+</details>
+
+<details>
+<summary><strong>📱 Mobile Views</strong> (click to expand)</summary>
+<br/>
+
+| Login | Student Dashboard | Attempt |
+|:---:|:---:|:---:|
+| ![Login](screenshots/mobile-chrome/login-normal.png) | ![Dashboard](screenshots/mobile-chrome/student-dashboard-normal.png) | ![Attempt](screenshots/mobile-chrome/student-attempt-active.png) |
+
+| Teacher Dashboard | Exam Builder | Monitor |
+|:---:|:---:|:---:|
+| ![Teacher](screenshots/mobile-chrome/teacher-dashboard-normal.png) | ![Builder](screenshots/mobile-chrome/exam-builder-step1.png) | ![Monitor](screenshots/mobile-chrome/teacher-monitor-normal.png) |
+
+</details>
+
+---
+
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
-    Browser[React client<br/>Vite + React Query] -->|HTTP /api/v1| API[Express app]
-    Browser -->|MSW in mock mode| Mock[MSW handlers]
-    API --> Middleware[Security and validation middleware]
-    Middleware --> Routes[Auth, users, questions,<br/>exams, attempts, analytics]
-    Routes --> Services[Domain services<br/>exam engine + grading]
-    Services --> Repos[Repository interfaces]
-    Repos --> Memory[(In-memory repositories)]
-    Repos --> Mongo[(MongoDB repositories)]
-    API --> Jobs[node-cron<br/>expired-attempt sweep]
-    Services --> Models[Mongoose models]
-    Models --> Mongo
+    Browser["🌐 React Client<br/>Vite + React Query"] -->|HTTP /api/v1| API["⚙️ Express API"]
+    Browser -->|MSW in mock mode| Mock["🧪 MSW Handlers"]
+    API --> MW["🔒 Middleware<br/>Auth · Validation · Rate Limit"]
+    MW --> Routes["📡 Routes<br/>Auth · Users · Questions<br/>Exams · Attempts · Analytics"]
+    Routes --> Services["🧠 Domain Services<br/>Exam Engine · Grading"]
+    Services --> Repos["📦 Repository Interfaces"]
+    Repos --> Memory[("💾 In-Memory")]
+    Repos --> Mongo[("🍃 MongoDB")]
+    API --> Jobs["⏰ node-cron<br/>Auto-submit expired attempts"]
 ```
 
-## Key engineering decisions
+### How it works (simplified)
 
-- **Server-authoritative time:** attempt start, expiry, exam phase, grace windows, and result availability are computed from server time rather than trusting browser clocks.
-- **Idempotent submit:** `finalizeIfInProgress` performs a conditional state transition. Repeated submit requests return the already-finalized attempt instead of grading twice.
-- **Published snapshotting:** publishing stores question text, options, correct answers, marks, and exam settings in the exam snapshot so later question-bank edits cannot change an active exam.
-- **Autosave with ordering:** answers include a client sequence and update time; stale writes are ignored, and Mongo updates use conditional filters for atomicity.
-- **Repository pattern:** services depend on domain-level repository interfaces rather than Mongoose. `REPOSITORY_DRIVER=memory` supports local development and tests; `REPOSITORY_DRIVER=mongo` provides persistent storage.
-- **Contract-first boundaries:** request validation and response envelopes are shared against the frozen API contract, keeping the React client and server independently testable.
-- **Defense in depth:** access tokens are short-lived, refresh tokens rotate and can be invalidated with `tokenVersion`, authentication is rate-limited, and production rejects development JWT secrets.
+1. **Student** opens the React app → logs in → joins an exam with a code
+2. **React client** talks to the Express API via REST endpoints (`/api/v1/...`)
+3. **API middleware** validates the JWT token, checks the role, and validates the request body
+4. **Exam Engine** manages the attempt — shuffles questions, tracks time, handles autosave
+5. **On submit** → Server grades all answers, calculates scores, stores results
+6. **Teacher** can monitor live attempts and review violations in real-time
 
-## Tech stack
+---
 
-**Client:** React 18, React Router, React Query, React Hook Form, Zod, Zustand, Tailwind CSS, Recharts, dnd-kit, Vite, MSW.
+## 🛠️ Tech Stack
 
-**Server:** Node.js 20+, Express, Mongoose, MongoDB, Zod, JWT, bcrypt, Helmet, CORS, Morgan, Multer, XLSX, node-cron.
+| Layer | Technologies |
+|---|---|
+| **Frontend** | React 18, React Router, TanStack Query, React Hook Form, Zod, Zustand, Tailwind CSS, Recharts, dnd-kit, Vite, MSW |
+| **Backend** | Node.js 20+, Express, Mongoose, JWT, bcrypt, Helmet, CORS, Morgan, Multer, XLSX, node-cron |
+| **Database** | MongoDB 7+ (or in-memory driver for development) |
+| **Testing** | Jest, Supertest, MongoDB Memory Server, Vitest, Testing Library, Playwright |
+| **Tooling** | ESLint, Prettier, npm workspaces |
 
-**Testing and tooling:** Jest, Supertest, MongoDB Memory Server, Vitest, Testing Library, ESLint, Prettier.
+---
 
-## Setup
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js 20 or newer
-- npm
-- MongoDB 7+ for persistent local development (optional; the memory driver needs no database)
+| Requirement | Version | Required? |
+|---|---|---|
+| Node.js | 20 or newer | ✅ Yes |
+| npm | (comes with Node) | ✅ Yes |
+| MongoDB | 7+ | ❌ Optional (in-memory driver works without it) |
 
-### Install
+### 1. Clone & Install
 
-```powershell
+```bash
 git clone https://github.com/PramanWalia/examguard.git
 cd examguard
 npm install
 ```
 
-### Run with the in-memory driver
+### 2. Configure Environment
 
-Copy `server/.env.example` to `server/.env`, keep `REPOSITORY_DRIVER=memory`, and provide local JWT secrets:
+```bash
+# Copy the example env file
+cp server/.env.example server/.env
+```
 
-```powershell
-Copy-Item server/.env.example server/.env
+The defaults work out of the box for local development. No changes needed!
+
+### 3. Start the App
+
+You need **two terminals**:
+
+```bash
+# Terminal 1 — Start the API server
 npm run dev
 ```
 
-In another terminal:
-
-```powershell
+```bash
+# Terminal 2 — Start the React client
 npm run dev:client
 ```
 
-Open [http://localhost:5173](http://localhost:5173). The API is available at [http://localhost:5000/api/v1](http://localhost:5000/api/v1), and health is available at [http://localhost:5000/api/v1/health](http://localhost:5000/api/v1/health).
+### 4. Open in Browser
 
-### Run with MongoDB
+| URL | What it is |
+|---|---|
+| [http://localhost:5173](http://localhost:5173) | 🌐 React app |
+| [http://localhost:5000/api/v1/health](http://localhost:5000/api/v1/health) | 💚 API health check |
 
-Set the following values in `server/.env`:
+### 5. Try it Out
+
+With `SEED_ON_START=true` (the default), the app comes pre-loaded with test data:
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@examguard.test` | `Admin1234` |
+| Teacher | `teacher1@examguard.test` | `Teacher1234` |
+| Student | `student1@examguard.test` | `Student1234` |
+
+> [!NOTE]
+> These are **development-only** seed accounts. They are only created when `SEED_ON_START=true` and the in-memory driver is active. Never use seed credentials in production.
+
+---
+
+## 🗄️ Using MongoDB (Optional)
+
+If you want persistent data that survives server restarts, switch to MongoDB:
 
 ```dotenv
+# In server/.env, change these:
 REPOSITORY_DRIVER=mongo
 MONGODB_URI=mongodb://127.0.0.1:27017/examguard
 SEED_ON_START=false
 ```
 
-Start the server and client as above. For an isolated fixture environment, set `SEED_ON_START=true`; do not use that setting for production data.
+Then create an admin account manually:
 
-Production deployments must set unique, strong `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values. The development defaults are rejected when `NODE_ENV=production`.
+```bash
+# Set environment variables, then run:
+ADMIN_EMAIL="your@email.com" ADMIN_PASSWORD="YourStrongPassword1" npm run create-admin --workspace server
+```
 
-## API overview
+> [!IMPORTANT]
+> For production, you **must** set unique, strong `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values. The app will refuse to start with the development defaults when `NODE_ENV=production`.
 
-All routes are prefixed with `/api/v1` and return the documented response envelope.
+---
 
-| Area | Representative endpoints | Purpose |
+## 📡 API Overview
+
+All endpoints are prefixed with `/api/v1`. Here's a quick summary:
+
+| Category | Endpoints | What it does |
 |---|---|---|
-| Health | `GET /health` | Liveness check |
-| Authentication | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` | Account lifecycle and token rotation |
-| Users | `GET /users`, `PATCH /users/:id`, `DELETE /users/:id` | Admin user management |
-| Questions | `GET/POST /questions`, `PATCH/DELETE /questions/:id`, `POST /questions/import` | Question-bank management |
-| Exams | `GET/POST /exams`, `PATCH/DELETE /exams/:id`, `POST /exams/:id/publish`, `POST /exams/join` | Exam authoring and lifecycle |
-| Attempts | `POST /exams/:id/start`, `PATCH /attempts/:id/answer`, `POST /attempts/:id/submit`, `GET /attempts/:id` | Timed exam execution |
-| Results | `GET /attempts/:id/result` | Released result access |
-| Monitoring | `POST /attempts/:id/violation`, `GET /exams/:id/monitor` | Integrity events and teacher review |
-| Analytics | Analytics routes under `/analytics` | Scores, distributions, history, and platform summaries |
+| 🏥 **Health** | `GET /health` | Check if the server is running |
+| 🔑 **Auth** | `POST /auth/register` · `/login` · `/refresh` · `/logout` · `GET /auth/me` | Sign up, log in, token refresh, log out |
+| 👥 **Users** | `GET /users` · `PATCH /users/:id` · `DELETE /users/:id` | Admin manages user accounts |
+| ❓ **Questions** | `GET /questions` · `POST /questions` · `PATCH /:id` · `DELETE /:id` · `POST /import` | Teacher manages question bank |
+| 📝 **Exams** | `GET /exams` · `POST /exams` · `PATCH /:id` · `DELETE /:id` · `POST /:id/publish` · `POST /join` | Create, edit, publish, and join exams |
+| ⏱️ **Attempts** | `POST /exams/:id/start` · `PATCH /attempts/:id/answer` · `POST /:id/submit` | Start exam, save answers, submit |
+| 📊 **Results** | `GET /attempts/:id/result` | View graded results |
+| 👁️ **Monitoring** | `POST /attempts/:id/violation` · `GET /exams/:id/monitor` | Report & view integrity violations |
+| 📈 **Analytics** | Routes under `/analytics` | Score distributions, history, summaries |
 
-See [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) for request schemas, authorization rules, status codes, and response shapes.
+📄 Full details → [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md)
 
-## Testing and quality checks
+---
 
-Run the backend contract, integration, repository, engine, grading, and Mongo tests:
+## 🧪 Running Tests
 
-```powershell
+```bash
+# Run all backend tests (unit + integration)
 npm test
+
+# Run contract tests specifically
 npm run test:contract --workspace server
-```
 
-Run client tests and quality checks:
+# Run MongoDB-specific tests (needs MongoDB running)
+npm run test:mongo --workspace server
 
-```powershell
+# Run frontend tests
 npm run test --workspace client
+
+# Lint all code
 npm run lint
+
+# Build the client (checks for compile errors)
 npm run build
+
+# Run end-to-end tests with Playwright
+npx playwright test
 ```
 
-The backend tests include repository contract coverage, concurrency-sensitive attempt operations, exam lifecycle flows, authentication, imports, and table-driven grading cases.
+### What the tests cover
 
-## Limitations and future work
+| Area | What's tested |
+|---|---|
+| **Repository contracts** | CRUD operations, uniqueness, pagination for all entity types |
+| **Auth flows** | Register, login, token rotation, logout, role guards |
+| **Exam engine** | Shuffle-once, autosave, stale-update rejection, grace period, idempotent submit |
+| **Grading** | Single-choice, multi-choice, numeric, negative marks, partial marks |
+| **E2E (Playwright)** | Full user flows — auth, teacher exam creation, student attempts, admin management |
 
-- **Browser proctoring is not proof of identity or misconduct.** Tab visibility, blur, fullscreen, copy/paste, and shortcut events are client-observable signals and can be missed, spoofed, blocked by browser permissions, or triggered by benign behavior. They should support human review, not make fully automated accusations.
-- A future integrity service could add explicit review workflows, configurable institution policies, stronger audit trails, and optional consent-based webcam or identity integrations where legally and ethically appropriate.
-- The current deployment story is local-first; production work would add CI/CD, managed MongoDB, secret management, observability, backups, alerting, and horizontal-scaling validation.
-- Analytics and monitoring can be further optimized with materialized aggregates, pagination for larger cohorts, and background processing.
-- Accessibility, localization, and real-device testing should be expanded before institutional rollout.
-- A hosted public demo and temporary, non-privileged demo accounts should be provisioned separately from source control.
+---
 
-## Project documentation
+## 🔑 Key Design Decisions
 
-- [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) — frozen client/server contract
-- [`docs/FRONTEND_NOTES.md`](docs/FRONTEND_NOTES.md) — client workflows and integration notes
-- [`docs/SERVER_NOTES.md`](docs/SERVER_NOTES.md) — server operations and security notes
-- [`docs/DATABASE_NOTES.md`](docs/DATABASE_NOTES.md) — MongoDB deployment guidance
+<details>
+<summary><strong>Why is the server authoritative for time?</strong></summary>
+
+Browser clocks can be wrong or manipulated. The server computes all timing — attempt start, expiry, exam phase, grace windows, and result availability — from its own clock. This prevents students from extending their exam time.
+</details>
+
+<details>
+<summary><strong>Why are published exams immutable snapshots?</strong></summary>
+
+When a teacher publishes an exam, the system takes a snapshot of all questions (text, options, answers, marks). This means editing a question in the question bank after publishing won't affect any active exam.
+</details>
+
+<details>
+<summary><strong>Why the Repository Pattern?</strong></summary>
+
+Services talk to abstract repository interfaces, not directly to MongoDB. Switching between `REPOSITORY_DRIVER=memory` (for development/tests) and `REPOSITORY_DRIVER=mongo` (for production) requires zero code changes — just an environment variable.
+</details>
+
+<details>
+<summary><strong>Why is submission idempotent?</strong></summary>
+
+Network issues can cause duplicate submit requests. The `finalizeIfInProgress` function does a conditional state transition — if the attempt is already submitted, it returns the existing result instead of grading again. This prevents score inconsistencies.
+</details>
+
+<details>
+<summary><strong>How does autosave work?</strong></summary>
+
+Every answer includes a `clientSeq` (sequence number) and timestamp. The server rejects any update where the sequence number is lower than what's already saved — preventing stale writes from overwriting newer answers, even with network delays.
+</details>
+
+---
+
+## 📁 Project Structure
+
+```
+examguard/
+├── client/                    # React frontend
+│   ├── src/
+│   │   ├── components/        # Reusable UI components
+│   │   ├── hooks/             # Custom hooks (timer, autosave, anti-cheat, etc.)
+│   │   ├── pages/             # Route-level page components
+│   │   ├── store/             # Zustand state stores
+│   │   ├── mocks/             # MSW mock handlers & seed data
+│   │   ├── api/               # API client
+│   │   ├── utils/             # Helpers (formatting, constants, errors)
+│   │   └── tests/             # Vitest unit tests
+│   └── public/                # Static assets
+│
+├── server/                    # Express backend
+│   ├── src/
+│   │   ├── routes/            # API route handlers
+│   │   ├── services/          # Business logic (auth, exam engine, grading)
+│   │   ├── repositories/      # Data access layer (memory + MongoDB)
+│   │   ├── models/            # Mongoose schemas
+│   │   ├── middleware/        # Auth, validation, error handling, rate limiting
+│   │   ├── validators/        # Zod request schemas
+│   │   ├── utils/             # Shared utilities
+│   │   ├── config/            # Environment & database config
+│   │   ├── jobs/              # Cron jobs (auto-submit expired attempts)
+│   │   └── tests/             # Jest integration tests
+│   └── .env.example           # Environment variable template
+│
+├── e2e/                       # Playwright end-to-end tests
+├── screenshots/               # UI screenshots (desktop + mobile)
+├── docs/                      # Project documentation
+│   ├── API_CONTRACT.md        # Complete API specification
+│   ├── FRONTEND_NOTES.md      # Client architecture notes
+│   ├── SERVER_NOTES.md        # Server architecture notes
+│   └── DATABASE_NOTES.md      # MongoDB setup guide
+└── package.json               # Root workspace config
+```
+
+---
+
+## ⚠️ Limitations & Future Work
+
+- **Browser proctoring ≠ proof of cheating.** Tab switches and copy/paste events are *signals* that support human review — they can be spoofed, blocked, or triggered by innocent actions. They should never be used for automated accusations.
+- **Local-first deployment.** Production would need CI/CD, managed MongoDB, secret management, observability, and horizontal scaling.
+- **Analytics** can be optimized with materialized aggregates and background processing for larger cohorts.
+- **Accessibility & localization** should be expanded before institutional rollout.
+- A **hosted public demo** with temporary, non-privileged accounts is planned.
+
+---
+
+## 📚 Documentation
+
+| Document | Description |
+|---|---|
+| [`API_CONTRACT.md`](docs/API_CONTRACT.md) | Complete API specification — endpoints, schemas, status codes, auth rules |
+| [`FRONTEND_NOTES.md`](docs/FRONTEND_NOTES.md) | Client architecture, routing, state management, MSW mocking |
+| [`SERVER_NOTES.md`](docs/SERVER_NOTES.md) | Server architecture, security, exam engine, grading logic |
+| [`DATABASE_NOTES.md`](docs/DATABASE_NOTES.md) | MongoDB setup, indexes, replica sets, Atlas deployment |
+
+---
+
+<div align="center">
+
+**Built with ❤️ by [Praman Walia](https://github.com/PramanWalia)**
+
+</div>
