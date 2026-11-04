@@ -139,7 +139,7 @@ export class MemoryAnalyticsRepository {
     const own = attempts.filter(
       (attempt) => attempt.status === 'submitted' && attempt.gradedPayload,
     );
-    const exams = await Promise.all(own.map((attempt) => this._examRepo.findById(attempt.examId)));
+    const exams = await this._examRepo.findByIds(own.map((attempt) => attempt.examId));
     const titles = new Map(exams.filter(Boolean).map((exam) => [exam.id, exam.title]));
     return own
       .sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime())

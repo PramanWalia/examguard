@@ -1,0 +1,5 @@
+{
+  "name": "ExamGuard",
+  "description": "Online Examination & Proctoring System with server-authoritative timers, anti-cheat signals, role-based workflows, and real-time monitoring.",
+  "requestFramePermissions": []
+}

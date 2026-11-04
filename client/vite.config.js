@@ -23,7 +23,6 @@ export default defineConfig({
           charts: ['recharts'],
           forms: ['react-hook-form', '@hookform/resolvers', 'zod'],
           'dnd-vendor': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
-          spreadsheet: ['xlsx'],
         },
       },
     },

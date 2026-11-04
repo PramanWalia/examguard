@@ -100,13 +100,14 @@ export const repositoryContract = (createRepos) => {
     expect(saved).toBeNull();
   });
 
-  it('finalizes an attempt only once', async () => {
+  it('finalizes an attempt only once and computes timeTakenSeconds', async () => {
     const { attempt } = await repos.attemptRepo.createIfNoActive(EXAM_ID, STUDENT_ID, baseAttempt());
     const first = await repos.attemptRepo.finalizeIfInProgress(attempt.id, { score: 10 });
     const second = await repos.attemptRepo.finalizeIfInProgress(attempt.id, { score: 99 });
 
     expect(first.status).toBe('submitted');
     expect(first.gradedPayload.score).toBe(10);
+    expect(first.timeTakenSeconds).toBeGreaterThanOrEqual(55);
     expect(second).toBeNull();
   });
 

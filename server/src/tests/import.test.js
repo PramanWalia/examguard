@@ -1,5 +1,4 @@
 import request from 'supertest';
-import XLSX from 'xlsx';
 
 import { bearer, createUser, login, makeApp } from './helpers.js';
 
@@ -59,25 +58,31 @@ describe('question import', () => {
     expect(list.body.data.every((question) => question.createdBy === owner.id)).toBe(true);
   });
 
-  it('imports an XLSX workbook', async () => {
-    const sheet = XLSX.utils.aoa_to_sheet([HEADERS, ROWS[0]]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, 'Questions');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  it('imports quoted CSV fields containing commas and escaped quotes', async () => {
+    const quotedCsv = [
+      HEADERS.join(','),
+      'Mathematics,Algebra,easy,single_choice,"Evaluate 1,000 + ""2,000""?",One,Two,"3,000",Four,c,,2,0',
+    ].join('\n');
 
-    const response = await upload('questions.xlsx', buffer);
+    const response = await upload('questions.csv', Buffer.from(quotedCsv));
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({ createdCount: 1, failedCount: 0 });
   });
 
-  it('rejects a workbook without the required columns', async () => {
+  it('rejects XLSX uploads with 415 UNSUPPORTED_FILE_TYPE', async () => {
+    const response = await upload('questions.xlsx', Buffer.from('PK\x03\x04'));
+    expect(response.status).toBe(415);
+    expect(response.body.error.code).toBe('UNSUPPORTED_FILE_TYPE');
+  });
+
+  it('rejects a CSV file without the required columns', async () => {
     const response = await upload('questions.csv', Buffer.from('subject,topic\nMathematics,Algebra'));
     expect(response.status).toBe(422);
     expect(response.body.error.code).toBe('IMPORT_VALIDATION_FAILED');
     expect(response.body.error.details.map((detail) => detail.path)).toContain('prompt');
   });
 
-  it('rejects a file that is not CSV or XLSX', async () => {
+  it('rejects a file that is not CSV', async () => {
     const response = await upload('questions.txt', Buffer.from(csv));
     expect(response.status).toBe(415);
     expect(response.body.error.code).toBe('UNSUPPORTED_FILE_TYPE');
@@ -89,3 +94,4 @@ describe('question import', () => {
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
   });
 });
+

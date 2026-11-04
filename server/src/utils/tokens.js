@@ -1,17 +1,35 @@
+import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 
 import { config } from '../config/env.js';
 
-export const signAccessToken = (user) =>
+export const newSessionIdentifiers = () => ({
+  sid: randomUUID(),
+  jti: randomUUID(),
+});
+
+export const signAccessToken = (user, { sid = null, jti = null } = {}) =>
   jwt.sign(
-    { sub: user.id, role: user.role, tv: user.tokenVersion },
+    {
+      sub: user.id,
+      role: user.role,
+      tv: user.tokenVersion,
+      ...(sid ? { sid } : {}),
+      ...(jti ? { jti } : {}),
+    },
     config.JWT_ACCESS_SECRET,
     { expiresIn: config.ACCESS_TOKEN_TTL },
   );
 
-export const signRefreshToken = (user) =>
+export const signRefreshToken = (user, { sid = null, jti = null } = {}) =>
   jwt.sign(
-    { sub: user.id, tv: user.tokenVersion, type: 'refresh' },
+    {
+      sub: user.id,
+      tv: user.tokenVersion,
+      type: 'refresh',
+      ...(sid ? { sid } : {}),
+      ...(jti ? { jti } : {}),
+    },
     config.JWT_REFRESH_SECRET,
     { expiresIn: config.REFRESH_TOKEN_TTL },
   );
@@ -22,7 +40,7 @@ export const verifyRefreshToken = (token) => jwt.verify(token, config.JWT_REFRES
 
 export const refreshCookieOptions = () => ({
   httpOnly: true,
-  secure: config.NODE_ENV === 'production',
+  secure: config.NODE_ENV === 'production' || Boolean(config.COOKIE_SECURE),
   sameSite: 'lax',
   path: '/api/v1/auth',
   maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -30,7 +48,7 @@ export const refreshCookieOptions = () => ({
 
 export const clearRefreshCookieOptions = () => ({
   httpOnly: true,
-  secure: config.NODE_ENV === 'production',
+  secure: config.NODE_ENV === 'production' || Boolean(config.COOKIE_SECURE),
   sameSite: 'lax',
   path: '/api/v1/auth',
   maxAge: 0,

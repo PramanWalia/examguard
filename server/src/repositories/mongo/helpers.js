@@ -2,12 +2,29 @@ import { DuplicateEmailError } from '../errors.js';
 
 const normalizeDates = (value, key) => {
   if (value instanceof Date) return value.toISOString();
-  if (key === 'answers' && Array.isArray(value)) {
-    return Object.fromEntries(value.map((answer) => [answer.itemId, normalizeDates(answer)]));
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      Array.from(value.entries()).map(([entryKey, entry]) => [
+        entryKey,
+        normalizeDates(entry, entryKey),
+      ]),
+    );
   }
-  if (Array.isArray(value)) return value.map(normalizeDates);
+  if (key === 'answers' && Array.isArray(value)) {
+    return Object.fromEntries(
+      value.map((answer) => [answer.itemId, normalizeDates(answer)]),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeDates(item));
+  }
   if (value && typeof value === 'object' && value.constructor === Object) {
-    return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [entryKey, normalizeDates(entry, entryKey)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entry]) => [
+        entryKey,
+        normalizeDates(entry, entryKey),
+      ]),
+    );
   }
   return value;
 };
@@ -15,18 +32,23 @@ const normalizeDates = (value, key) => {
 export const plain = (value) => {
   if (!value) return null;
   const row = value.toObject ? value.toObject() : value;
+  const normalized = normalizeDates(row);
   return {
-    ...normalizeDates(row),
+    ...normalized,
     id: String(row._id ?? row.id),
     createdBy: row.createdBy ? String(row.createdBy) : row.createdBy,
     examId: row.examId ? String(row.examId) : row.examId,
     studentId: row.studentId ? String(row.studentId) : row.studentId,
     questionId: row.questionId ? String(row.questionId) : row.questionId,
+    joinedExamIds: Array.isArray(row.joinedExamIds)
+      ? row.joinedExamIds.map(String)
+      : normalized.joinedExamIds,
     _id: undefined,
   };
 };
 
 export const many = (rows) => rows.map(plain);
+
 export const pageMeta = (page, limit, total) => {
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const safePage = Math.min(Math.max(1, page), totalPages);
@@ -39,6 +61,7 @@ export const pageMeta = (page, limit, total) => {
     hasPreviousPage: safePage > 1,
   };
 };
+
 export const duplicateEmail = (error) => {
   if (error?.code === 11000) throw new DuplicateEmailError();
   throw error;

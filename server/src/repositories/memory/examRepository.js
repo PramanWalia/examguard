@@ -8,9 +8,6 @@ const clone = (value) => structuredClone(value);
 
 /**
  * In-memory exam repository.
- *
- * `publish` is the only multi-field transition and runs synchronously: no
- * request can observe a half-published exam (draft items with published status).
  */
 export class MemoryExamRepository {
   constructor() {
@@ -25,7 +22,11 @@ export class MemoryExamRepository {
         .replace(/[^A-Z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 20) || 'EXAM';
-    const used = new Set(Array.from(this._exams.values()).map((exam) => exam.joinCode).filter(Boolean));
+    const used = new Set(
+      Array.from(this._exams.values())
+        .map((exam) => exam.joinCode)
+        .filter(Boolean),
+    );
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const code = `${prefix}-${randomInt(1000, 10000)}`.slice(0, 32);
       if (!used.has(code)) return code;
@@ -60,7 +61,9 @@ export class MemoryExamRepository {
         numericTolerance: input.settings?.numericTolerance ?? 1e-9,
       },
       assignment,
-      joinCode: input.joinCode || (status === 'published' && assignment.joinCodeEnabled ? this._uniqueJoinCode() : null),
+      joinCode:
+        input.joinCode ||
+        (status === 'published' && assignment.joinCodeEnabled ? this._uniqueJoinCode() : null),
       items: (input.items || []).map((item, index) => ({
         id: item.id || newId(),
         questionId: item.questionId,
@@ -86,6 +89,14 @@ export class MemoryExamRepository {
     return exam ? clone(exam) : null;
   }
 
+  async findByIds(ids) {
+    const uniqueIds = [...new Set((ids || []).map(String))];
+    return uniqueIds
+      .map((id) => this._exams.get(id))
+      .filter(Boolean)
+      .map(clone);
+  }
+
   async updateById(id, patch) {
     const exam = this._exams.get(id);
     if (!exam) return null;
@@ -93,12 +104,16 @@ export class MemoryExamRepository {
       ...exam,
       ...(patch.title !== undefined && { title: String(patch.title).trim() }),
       ...(patch.description !== undefined && { description: String(patch.description).trim() }),
-      ...(patch.durationMinutes !== undefined && { durationMinutes: Number(patch.durationMinutes) }),
+      ...(patch.durationMinutes !== undefined && {
+        durationMinutes: Number(patch.durationMinutes),
+      }),
       ...(patch.startAt !== undefined && { startAt: patch.startAt }),
       ...(patch.endAt !== undefined && { endAt: patch.endAt }),
       ...(patch.resultMode !== undefined && { resultMode: patch.resultMode }),
       ...(patch.settings !== undefined && { settings: { ...exam.settings, ...patch.settings } }),
-      ...(patch.assignment !== undefined && { assignment: { ...exam.assignment, ...patch.assignment } }),
+      ...(patch.assignment !== undefined && {
+        assignment: { ...exam.assignment, ...patch.assignment },
+      }),
       ...(patch.items !== undefined && {
         items: patch.items.map((item, index) => ({
           id: item.id || newId(),
@@ -125,7 +140,6 @@ export class MemoryExamRepository {
   async publish(id, teacherId, prepared) {
     const exam = this._exams.get(id);
     if (!exam || exam.createdBy !== teacherId || exam.status !== 'draft') return null;
-    // Synchronous transition: swap status, items and join code in one block.
     if (!prepared || !prepared.items?.length) return null;
     const joinCode = exam.assignment.joinCodeEnabled ? this._uniqueJoinCode(exam.title) : null;
     const published = {
@@ -178,6 +192,39 @@ export class MemoryExamRepository {
 
     const { data, meta } = paginate(rows.map(clone), page, limit);
     return { data, meta: { ...meta, summary, batches } };
+  }
+
+  async listEligibleForStudent({
+    batchIds = [],
+    joinedExamIds = [],
+    scope = 'all',
+    submittedExamIds = [],
+    now = new Date(),
+    page = 1,
+    limit = 20,
+  } = {}) {
+    const batchSet = new Set(batchIds);
+    const joinedSet = new Set(joinedExamIds.map(String));
+    const submittedSet = new Set(submittedExamIds.map(String));
+    const nowTime = now instanceof Date ? now : new Date(now);
+
+    const eligible = Array.from(this._exams.values())
+      .filter((exam) => {
+        if (exam.status !== 'published') return false;
+        const inBatch = (exam.assignment?.batchIds || []).some((batchId) => batchSet.has(batchId));
+        const hasJoined = joinedSet.has(String(exam.id));
+        if (!inBatch && !hasJoined) return false;
+
+        const phase = examPhase(exam, nowTime);
+        const isSubmitted = submittedSet.has(String(exam.id));
+        if (scope === 'upcoming') return phase === 'upcoming';
+        if (scope === 'live') return phase === 'live' && !isSubmitted;
+        if (scope === 'past') return phase === 'ended' || isSubmitted;
+        return true;
+      })
+      .sort((left, right) => new Date(left.startAt).getTime() - new Date(right.startAt).getTime());
+
+    return paginate(eligible.map(clone), page, limit);
   }
 
   async findByJoinCode(code) {

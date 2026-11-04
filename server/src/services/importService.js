@@ -1,24 +1,26 @@
-import XLSX from 'xlsx';
-
+import { parseCsvRows } from '../utils/csv.js';
 import { AppError } from '../utils/errors.js';
 import { questionSchema, requiredImportHeaders } from '../validators/question.js';
 import { zodDetails } from '../validators/common.js';
 
 const OPTION_HEADERS = ['optiona', 'optionb', 'optionc', 'optiond', 'optione', 'optionf'];
 
-const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, '');
+const normalizeHeader = (value) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
 
 const readRows = (buffer) => {
-  let workbook;
+  let rows;
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' });
+    rows = parseCsvRows(buffer);
   } catch {
     throw new AppError(422, 'IMPORT_VALIDATION_FAILED', 'The import file could not be read.');
   }
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new AppError(422, 'IMPORT_VALIDATION_FAILED', 'The workbook has no sheets.');
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' });
-  if (!rows.length) throw new AppError(422, 'IMPORT_VALIDATION_FAILED', 'The file is empty.');
+  if (!rows.length) {
+    throw new AppError(422, 'IMPORT_VALIDATION_FAILED', 'The file is empty.');
+  }
   return rows;
 };
 
@@ -47,12 +49,13 @@ const toInput = (headers, row) => {
     numericAnswer: numeric === '' ? null : Number(numeric),
     explanation: String(record.explanation ?? '').trim(),
     defaultMarks: Number(record.defaultmarks),
-    negativeMarks: String(record.negativemarks ?? '').trim() === '' ? 0 : Number(record.negativemarks),
+    negativeMarks:
+      String(record.negativemarks ?? '').trim() === '' ? 0 : Number(record.negativemarks),
   };
 };
 
 /**
- * Import CSV/XLSX rows. Bad rows are reported, good rows are still created
+ * Import CSV rows. Bad rows are reported, good rows are still created
  * (partial success). Only an unreadable file or missing headers is a 422.
  */
 export const importQuestions = async (questionRepo, user, buffer) => {

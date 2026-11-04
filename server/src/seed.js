@@ -200,7 +200,14 @@ const makeExam = async (examRepo, input) => {
  * Idempotent: does nothing when the repository already holds users.
  * @returns {Promise<{seeded: boolean, accounts: string[]}>}
  */
-export const seedRepositories = async (repos, { force = false } = {}) => {
+export const seedRepositories = async (
+  repos,
+  { force = false, env = config.NODE_ENV, nodeEnv } = {},
+) => {
+  const effectiveEnv = nodeEnv ?? env;
+  if (effectiveEnv === 'production' || process.env.NODE_ENV === 'production') {
+    throw new Error('Seeding is disabled in production (NODE_ENV=production).');
+  }
   if (force && config.REPOSITORY_DRIVER === 'mongo') {
     const { UserModel } = await import('./models/user.js');
     const { QuestionModel } = await import('./models/question.js');
@@ -225,7 +232,7 @@ export const seedRepositories = async (repos, { force = false } = {}) => {
     student: await bcrypt.hash('Student1234', config.BCRYPT_ROUNDS),
   };
 
-  const admin = await repos.userRepo.create({
+  await repos.userRepo.create({
     name: 'Platform Admin',
     email: 'admin@examguard.test',
     passwordHash: hashes.admin,

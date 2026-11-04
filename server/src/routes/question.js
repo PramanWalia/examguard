@@ -45,12 +45,12 @@ questionRouter.post(
   asyncHandler(async (req, res) => {
     if (!req.file) {
       throw badRequest('One or more fields are invalid.', [
-        { path: 'file', message: 'Choose a CSV or XLSX file.' },
+        { path: 'file', message: 'Choose a CSV file.' },
       ]);
     }
     const extension = req.file.originalname.split('.').pop()?.toLowerCase();
-    if (!['csv', 'xlsx'].includes(extension)) {
-      throw new AppError(415, 'UNSUPPORTED_FILE_TYPE', 'Only CSV and XLSX files are supported.');
+    if (extension !== 'csv') {
+      throw new AppError(415, 'UNSUPPORTED_FILE_TYPE', 'Only CSV files are supported.');
     }
     const result = await importQuestions(req.app.locals.repos.questionRepo, req.user, req.file.buffer);
     ok(res, result);

@@ -10,31 +10,58 @@ import { MongoExamRepository } from './mongo/examRepository.js';
 import { MongoQuestionRepository } from './mongo/questionRepository.js';
 import { MongoUserRepository } from './mongo/userRepository.js';
 
-export { MemoryAnalyticsRepository, MemoryAttemptRepository, MemoryExamRepository, MemoryQuestionRepository, MemoryUserRepository };
-
 /**
- * Build a repository set. Each call returns isolated maps, which is what tests
- * and every app instance rely on.
- *
- * @param {'memory'|'mongo'} [driver]
- * @returns {import('./interfaces.js').RepositoryFactory}
+ * Build isolated repository instances for the given driver.
+ * Refuses to instantiate the in-memory driver when running in production.
  */
-export const createRepositoryFactory = (driver = config.REPOSITORY_DRIVER) => {
+export const createRepositoryFactory = (
+  driver = config.REPOSITORY_DRIVER,
+  envOrOptions = config.NODE_ENV,
+) => {
+  const env = typeof envOrOptions === 'object' && envOrOptions !== null
+    ? envOrOptions.nodeEnv ?? config.NODE_ENV
+    : envOrOptions;
+  if (env === 'production' && driver !== 'mongo') {
+    throw new Error(
+      'In-memory repository driver is not allowed in production. Set REPOSITORY_DRIVER=mongo.',
+    );
+  }
+
+  if (driver === 'memory') {
+    const userRepo = new MemoryUserRepository();
+    const questionRepo = new MemoryQuestionRepository();
+    const examRepo = new MemoryExamRepository();
+    const attemptRepo = new MemoryAttemptRepository();
+    const analyticsRepo = new MemoryAnalyticsRepository({
+      attemptRepo,
+      examRepo,
+      userRepo,
+    });
+    return {
+      driver: 'memory',
+      userRepo,
+      questionRepo,
+      examRepo,
+      attemptRepo,
+      analyticsRepo,
+    };
+  }
+
   if (driver === 'mongo') {
     const userRepo = new MongoUserRepository();
     const questionRepo = new MongoQuestionRepository();
     const examRepo = new MongoExamRepository();
     const attemptRepo = new MongoAttemptRepository();
     const analyticsRepo = new MongoAnalyticsRepository();
-    return { userRepo, questionRepo, examRepo, attemptRepo, analyticsRepo };
+    return {
+      driver: 'mongo',
+      userRepo,
+      questionRepo,
+      examRepo,
+      attemptRepo,
+      analyticsRepo,
+    };
   }
-  if (driver !== 'memory') throw new Error(`Unsupported REPOSITORY_DRIVER "${driver}".`);
 
-  const userRepo = new MemoryUserRepository();
-  const questionRepo = new MemoryQuestionRepository();
-  const examRepo = new MemoryExamRepository();
-  const attemptRepo = new MemoryAttemptRepository();
-  const analyticsRepo = new MemoryAnalyticsRepository({ attemptRepo, examRepo, userRepo });
-
-  return { userRepo, questionRepo, examRepo, attemptRepo, analyticsRepo };
+  throw new Error(`Unsupported REPOSITORY_DRIVER "${driver}". Expected "memory" or "mongo".`);
 };

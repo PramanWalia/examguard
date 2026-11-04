@@ -11,6 +11,8 @@ export const publicUser = (user) =>
         role: user.role,
         batchIds: [...(user.batchIds || [])],
         isActive: Boolean(user.isActive),
+        approvalStatus:
+          user.approvalStatus || (!user.isActive && user.role === 'teacher' ? 'pending' : 'approved'),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       }

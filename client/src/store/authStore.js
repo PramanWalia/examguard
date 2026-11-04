@@ -32,10 +32,16 @@ export const useAuthStore = create((set, get) => ({
   register: async (registration) => {
     set({ isLoading: true });
     try {
-      const response = await apiClient.post('/auth/register', registration, { skipAuthRefresh: true });
-      const { user, accessToken } = unwrap(response);
+      const response = await apiClient.post('/auth/register', registration, {
+        skipAuthRefresh: true,
+      });
+      const { user, accessToken, pendingApproval } = unwrap(response);
+      if (pendingApproval || !accessToken) {
+        set({ user: null, accessToken: null, isLoading: false, isBootstrapping: false });
+        return { user, pendingApproval: true };
+      }
       set({ user, accessToken, isLoading: false, isBootstrapping: false });
-      return user;
+      return { user, pendingApproval: false };
     } catch (error) {
       set({ isLoading: false });
       throw error;

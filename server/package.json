@@ -8,8 +8,9 @@
     "start": "node src/server.js",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --runInBand",
-    "test:contract": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --runInBand src/tests/contract.test.js",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test:contract": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand src/tests/contract.test.js",
+    "test:mongo": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand src/tests/mongoRepositories.test.js src/tests/mongoContract.test.js src/tests/mongoExplain.test.js src/tests/mongoSeed.test.js src/tests/mongoIntegration.test.js",
     "seed": "node src/seed.js",
     "create-admin": "node src/createAdmin.js"
   },
@@ -27,7 +28,6 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.2",
     "node-cron": "^3.0.3",
-    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {

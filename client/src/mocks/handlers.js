@@ -162,18 +162,41 @@ const authHandlers = [
         return fail(409, 'DUPLICATE_EMAIL', 'An account with this email already exists.');
       }
       const now = new Date().toISOString();
+      const role = body.role || 'student';
+      let isActive = true;
+      let approvalStatus = 'approved';
+      if (role === 'teacher') {
+        const inviteCode = String(body.inviteCode || '').trim();
+        if (inviteCode) {
+          if (inviteCode !== 'TEACH-2026') {
+            return fail(
+              403,
+              'INVALID_INVITE_CODE',
+              'Invalid teacher invite code. Leave blank to request administrator approval.',
+            );
+          }
+        } else {
+          isActive = false;
+          approvalStatus = 'pending';
+        }
+      }
       const user = {
         id: S.newId(),
         name: body.name.trim(),
         email,
-        role: body.role || 'student',
+        role,
         batchIds: [],
-        isActive: true,
+        isActive,
+        approvalStatus,
         password: body.password,
         createdAt: now,
         updatedAt: now,
       };
       S.state.users.push(user);
+      if (!isActive) {
+        S.persist();
+        return ok({ user: S.publicUser(user), accessToken: null, pendingApproval: true }, undefined, 201);
+      }
       S.state.currentUserId = user.id;
       S.persist();
       return ok({ user: S.publicUser(user), accessToken: `mock-access.${user.id}.${Date.now()}` }, undefined, 201);
@@ -383,12 +406,12 @@ const questionHandlers = [
       const form = await request.formData();
       const file = form.get('file');
       if (!file || typeof file === 'string') {
-        return validationError([{ path: 'file', message: 'Choose a CSV or XLSX file.' }]);
+        return validationError([{ path: 'file', message: 'Choose a CSV file.' }]);
       }
       if (file.size > 5 * 1024 * 1024) return fail(413, 'FILE_TOO_LARGE', 'The import file must be 5 MB or smaller.');
       const extension = file.name.split('.').pop()?.toLowerCase();
-      if (!['csv', 'xlsx'].includes(extension)) {
-        return fail(415, 'UNSUPPORTED_FILE_TYPE', 'Only CSV and XLSX files are supported.');
+      if (extension !== 'csv') {
+        return fail(415, 'UNSUPPORTED_FILE_TYPE', 'Only CSV files are supported.');
       }
 
       let rows;
@@ -898,6 +921,26 @@ const attemptHandlers = [
         201,
       );
     });
+  }),
+  http.post(`${API}/attempts/:id/heartbeat`, ({ request, params }) => {
+    const auth = authorize(request, ['student']);
+    if (auth.error) return auth.error;
+    return simulate(() => {
+      const { attempt, error } = findAttemptOrFail(params.id);
+      if (error) return error;
+      if (attempt.studentId !== auth.user.id) return fail(403, 'FORBIDDEN', 'This attempt belongs to another student.');
+      const exam = S.findExam(attempt.examId);
+      if (!exam) return fail(404, 'NOT_FOUND', 'Exam not found.');
+      S.ensureNotExpired(attempt, exam);
+      return ok({
+        attemptId: attempt.id,
+        status: attempt.status,
+        violationCount: attempt.violationEvents.length,
+        maxViolations: exam.settings.violationLimit,
+        autoSubmitted: false,
+        serverTime: S.serverNowIso(),
+      });
+    }, { skipFailure: true });
   }),
   http.post(`${API}/attempts/:id/submit`, ({ request, params }) => {
     const auth = authorize(request, ['student']);

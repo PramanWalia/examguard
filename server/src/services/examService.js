@@ -1,3 +1,4 @@
+import { config } from '../config/env.js';
 import { AppError, forbidden, notFound } from '../utils/errors.js';
 import { escapeCsvCell, slugify } from '../utils/csv.js';
 import { examPhase } from '../utils/examTime.js';
@@ -110,7 +111,9 @@ const buildQuestionSet = (exam) => {
     ...item,
     question: {
       ...item.question,
-      options: settings.shuffleOptions ? shuffle(item.question.options || []) : item.question.options || [],
+      options: settings.shuffleOptions
+        ? shuffle(item.question.options || [])
+        : item.question.options || [],
     },
   }));
 };
@@ -127,9 +130,121 @@ const finalizeExpired = async (attemptRepo, attempt, exam, now = new Date()) => 
   return updated || (await attemptRepo.findById(attempt.id));
 };
 
+/**
+ * Finalize only expired in-progress attempts for an exam instead of loading every attempt.
+ */
 const finalizeExpiredForExam = async (repos, exam, now = new Date()) => {
-  const attempts = await repos.attemptRepo.listByExam(exam.id);
-  await Promise.all(attempts.map((attempt) => finalizeExpired(repos.attemptRepo, attempt, exam, now)));
+  const expiredAttempts =
+    typeof repos.attemptRepo.findExpiredInProgressByExam === 'function'
+      ? await repos.attemptRepo.findExpiredInProgressByExam(exam.id, now.toISOString())
+      : (await repos.attemptRepo.listByExam(exam.id)).filter(
+          (attempt) =>
+            attempt.status === 'in_progress' &&
+            new Date(attempt.expiresAt).getTime() <= now.getTime(),
+        );
+
+  if (!expiredAttempts.length) return;
+  await Promise.all(
+    expiredAttempts.map((attempt) => finalizeExpired(repos.attemptRepo, attempt, exam, now)),
+  );
+};
+
+/**
+ * Evaluate server-side proctoring signals (IP change, User-Agent change,
+ * missed autosave heartbeats, and long gaps between answers).
+ */
+export const evaluateServerProctoringSignals = async (
+  repos,
+  attempt,
+  exam,
+  clientContext = {},
+  { isAnswerSave = false, now = new Date() } = {},
+) => {
+  if (!attempt || attempt.status !== 'in_progress') return attempt;
+
+  const nowStr = now.toISOString();
+  const nowMs = now.getTime();
+  const session = attempt.clientSession || {};
+  const signals = [];
+  const nextContextPatch = {
+    lastHeartbeatAt: nowStr,
+  };
+
+  if (clientContext.ip) {
+    if (session.ip && session.ip !== clientContext.ip) {
+      signals.push({
+        type: 'ip_change',
+        source: 'server',
+        meta: { previousIp: session.ip, currentIp: clientContext.ip },
+        occurredAt: nowStr,
+      });
+    }
+    nextContextPatch.ip = clientContext.ip;
+  }
+
+  if (clientContext.userAgent) {
+    if (session.userAgent && session.userAgent !== clientContext.userAgent) {
+      signals.push({
+        type: 'user_agent_change',
+        source: 'server',
+        meta: {
+          previousUserAgent: session.userAgent,
+          currentUserAgent: clientContext.userAgent,
+        },
+        occurredAt: nowStr,
+      });
+    }
+    nextContextPatch.userAgent = clientContext.userAgent;
+  }
+
+  const heartbeatTimeoutSec =
+    exam.settings?.heartbeatTimeoutSeconds ?? config.HEARTBEAT_TIMEOUT_SECONDS ?? 90;
+  const lastHbRef = session.lastHeartbeatAt || attempt.startedAt;
+  if (lastHbRef) {
+    const hbGapSec = (nowMs - new Date(lastHbRef).getTime()) / 1000;
+    if (hbGapSec > heartbeatTimeoutSec) {
+      signals.push({
+        type: 'heartbeat_missed',
+        source: 'server',
+        meta: { gapSeconds: Math.round(hbGapSec), thresholdSeconds: heartbeatTimeoutSec },
+        occurredAt: nowStr,
+      });
+    }
+  }
+
+  if (isAnswerSave) {
+    const maxAnswerGapSec =
+      exam.settings?.maxAnswerGapSeconds ?? config.MAX_ANSWER_GAP_SECONDS ?? 300;
+    const lastAnswerRef = session.lastAnswerAt || attempt.startedAt;
+    if (lastAnswerRef) {
+      const answerGapSec = (nowMs - new Date(lastAnswerRef).getTime()) / 1000;
+      if (answerGapSec > maxAnswerGapSec) {
+        signals.push({
+          type: 'long_answer_gap',
+          source: 'server',
+          meta: { gapSeconds: Math.round(answerGapSec), thresholdSeconds: maxAnswerGapSec },
+          occurredAt: nowStr,
+        });
+      }
+    }
+    nextContextPatch.lastAnswerAt = nowStr;
+  }
+
+  let currentAttempt = attempt;
+  for (const signal of signals) {
+    const updated = await repos.attemptRepo.recordViolation(currentAttempt.id, signal);
+    if (updated) currentAttempt = updated;
+  }
+
+  if (typeof repos.attemptRepo.updateClientContext === 'function') {
+    const patched = await repos.attemptRepo.updateClientContext(
+      currentAttempt.id,
+      nextContextPatch,
+    );
+    if (patched) currentAttempt = patched;
+  }
+
+  return currentAttempt;
 };
 
 // ---------------------------------------------------------------------------
@@ -162,15 +277,71 @@ export const listExams = async (repos, user, query) => {
   return { data: data.map((exam) => examListRow(exam)), meta };
 };
 
-export const availableExams = async (repos, user, query) => {
+export const availableExams = async (repos, user, query = {}) => {
   const now = new Date();
-  const exams = (await repos.examRepo.list({ status: 'published', page: 1, limit: 100 })).data;
+  const [student, joinedExamIds, rawAttempts] = await Promise.all([
+    repos.userRepo.findById(user.id),
+    repos.userRepo.getJoinedExamIds(user.id),
+    repos.attemptRepo.listByStudent(user.id),
+  ]);
 
+  const batchIds = student?.batchIds || user.batchIds || [];
+
+  // Lazily finalize any expired in-progress attempts owned by this student in batch.
+  const expiredInProgress = rawAttempts.filter(
+    (attempt) =>
+      attempt.status === 'in_progress' && new Date(attempt.expiresAt).getTime() <= now.getTime(),
+  );
+  let attempts = rawAttempts;
+  if (expiredInProgress.length > 0) {
+    const expiredExams =
+      typeof repos.examRepo.findByIds === 'function'
+        ? await repos.examRepo.findByIds(expiredInProgress.map((attempt) => attempt.examId))
+        : await Promise.all(
+            expiredInProgress.map((attempt) => repos.examRepo.findById(attempt.examId)),
+          );
+    const examMap = new Map(expiredExams.filter(Boolean).map((exam) => [exam.id, exam]));
+    await Promise.all(
+      expiredInProgress.map((attempt) => {
+        const exam = examMap.get(attempt.examId);
+        return exam ? finalizeExpired(repos.attemptRepo, attempt, exam, now) : attempt;
+      }),
+    );
+    attempts = await repos.attemptRepo.listByStudent(user.id);
+  }
+
+  const attemptByExamId = new Map();
+  for (const attempt of attempts) {
+    attemptByExamId.set(attempt.examId, attempt);
+  }
+
+  const submittedExamIds = [...attemptByExamId.values()]
+    .filter((attempt) => attempt.status === 'submitted')
+    .map((attempt) => attempt.examId);
+
+  if (typeof repos.examRepo.listEligibleForStudent === 'function') {
+    const { data: eligibleExams, meta } = await repos.examRepo.listEligibleForStudent({
+      batchIds,
+      joinedExamIds,
+      scope: query.scope || 'all',
+      submittedExamIds,
+      now,
+      page: query.page || 1,
+      limit: query.limit || 20,
+    });
+    const rows = eligibleExams.map((exam) =>
+      studentExamMeta(exam, attemptByExamId.get(exam.id) || null, now),
+    );
+    return { data: rows, meta: { ...meta, serverTime: nowIso() } };
+  }
+
+  // Fallback for custom stub repositories in tests that do not implement listEligibleForStudent.
+  const exams = (await repos.examRepo.list({ status: 'published', page: 1, limit: 1000 })).data;
   const rows = [];
   for (const exam of exams) {
-    if (!(await isEligible(repos.userRepo, exam, user.id))) continue;
-    let attempt = await repos.attemptRepo.findByExamAndStudent(exam.id, user.id);
-    attempt = await finalizeExpired(repos.attemptRepo, attempt, exam, now);
+    const inBatch = (exam.assignment?.batchIds || []).some((batchId) => batchIds.includes(batchId));
+    if (!inBatch && !joinedExamIds.includes(exam.id)) continue;
+    const attempt = attemptByExamId.get(exam.id) || null;
     const meta = studentExamMeta(exam, attempt, now);
     if (query.scope === 'past' && meta.availability !== 'ended' && meta.attemptStatus !== 'submitted') continue;
     if (query.scope === 'live' && (meta.availability !== 'live' || meta.attemptStatus === 'submitted')) continue;
@@ -178,7 +349,6 @@ export const availableExams = async (repos, user, query) => {
     rows.push(meta);
   }
   rows.sort((left, right) => new Date(left.startAt).getTime() - new Date(right.startAt).getTime());
-
   const { data, meta } = paginate(rows, query.page, query.limit);
   return { data, meta: { ...meta, serverTime: nowIso() } };
 };
@@ -230,8 +400,6 @@ export const updateExam = async (repos, user, id, patch) => {
     }));
   }
 
-  // Full validation after the merge: a partial patch must not leave timing,
-  // marks, or assignment in an invalid combination.
   const merged = parseInput(examSchema, {
     title: patch.title ?? exam.title,
     description: patch.description ?? exam.description,
@@ -241,7 +409,11 @@ export const updateExam = async (repos, user, id, patch) => {
     resultMode: patch.resultMode ?? exam.resultMode,
     settings: { ...exam.settings, ...(patch.settings || {}) },
     assignment: { ...exam.assignment, ...(patch.assignment || {}) },
-    items: items.map(({ questionId, marks, negativeMarks }) => ({ questionId, marks, negativeMarks })),
+    items: items.map(({ questionId, marks, negativeMarks }) => ({
+      questionId,
+      marks,
+      negativeMarks,
+    })),
   });
 
   const updateFn = repos.examRepo.updateDraftById
@@ -259,7 +431,9 @@ export const updateExam = async (repos, user, id, patch) => {
       questionSnapshot: item.questionSnapshot,
     })),
   });
-  if (!updated) throw fail(409, 'INVALID_STATE', 'Exam was published or no longer available as a draft.');
+  if (!updated) {
+    throw fail(409, 'INVALID_STATE', 'Exam was published or no longer available as a draft.');
+  }
   return teacherExam(updated);
 };
 
@@ -275,8 +449,12 @@ export const deleteExam = async (repos, user, id) => {
 export const publishExam = async (repos, user, id) => {
   const exam = await loadExam(repos.examRepo, id);
   assertExamOwner(user, exam);
-  if (exam.status === 'published') throw fail(409, 'INVALID_STATE', 'This exam is already published.');
-  if (!exam.items.length) throw fail(409, 'INVALID_STATE', 'Add at least one question before publishing.');
+  if (exam.status === 'published') {
+    throw fail(409, 'INVALID_STATE', 'This exam is already published.');
+  }
+  if (!exam.items.length) {
+    throw fail(409, 'INVALID_STATE', 'Add at least one question before publishing.');
+  }
 
   const resolved = await resolveQuestions(repos.questionRepo, user, exam.items);
   const prepared = {
@@ -291,7 +469,9 @@ export const publishExam = async (repos, user, id) => {
     totalMarks: resolved.reduce((sum, item) => sum + Number(item.marks), 0),
   };
   const published = await repos.examRepo.publish(id, exam.createdBy, prepared);
-  if (!published) throw fail(409, 'INVALID_STATE', 'This exam cannot be published in its current state.');
+  if (!published) {
+    throw fail(409, 'INVALID_STATE', 'This exam cannot be published in its current state.');
+  }
   return {
     id: published.id,
     status: published.status,
@@ -306,7 +486,9 @@ export const joinExam = async (repos, user, joinCode) => {
   if (exam.status !== 'published' || !exam.assignment?.joinCodeEnabled) {
     throw fail(403, 'EXAM_NOT_LIVE', 'This exam is not accepting join codes.');
   }
-  if (examPhase(exam) === 'ended') throw fail(403, 'EXAM_NOT_LIVE', 'This exam has already ended.');
+  if (examPhase(exam) === 'ended') {
+    throw fail(403, 'EXAM_NOT_LIVE', 'This exam has already ended.');
+  }
 
   await repos.userRepo.addJoinedExam(user.id, exam.id);
   const attempt = await finalizeExpired(
@@ -321,7 +503,7 @@ export const joinExam = async (repos, user, joinCode) => {
 // Attempts
 // ---------------------------------------------------------------------------
 
-export const startAttempt = async (repos, user, examId) => {
+export const startAttempt = async (repos, user, examId, clientContext = {}) => {
   const exam = await loadExam(repos.examRepo, examId);
   if (exam.status !== 'published' || examPhase(exam) !== 'live') {
     throw fail(403, 'EXAM_NOT_LIVE', 'This exam is not live right now.');
@@ -336,8 +518,11 @@ export const startAttempt = async (repos, user, examId) => {
     exam,
   );
   if (existing) {
-    if (existing.status === 'submitted') throw fail(409, 'ALREADY_ATTEMPTED', 'You have already submitted this exam.');
-    return { attempt: existing, exam, created: false };
+    if (existing.status === 'submitted') {
+      throw fail(409, 'ALREADY_ATTEMPTED', 'You have already submitted this exam.');
+    }
+    const evaluated = await evaluateServerProctoringSignals(repos, existing, exam, clientContext);
+    return { attempt: evaluated, exam, created: false };
   }
 
   const now = new Date();
@@ -364,6 +549,12 @@ export const startAttempt = async (repos, user, examId) => {
       },
       answers: {},
       violations: [],
+      clientSession: {
+        ip: clientContext.ip || null,
+        userAgent: clientContext.userAgent || null,
+        lastHeartbeatAt: startedAt,
+        lastAnswerAt: startedAt,
+      },
     },
     { maxAttempts: exam.settings?.maxAttempts ?? 1 },
   );
@@ -375,10 +566,9 @@ export const startAttempt = async (repos, user, examId) => {
   return { attempt, exam, created: true };
 };
 
-export const saveAnswer = async (repos, user, attemptId, body) => {
+export const saveAnswer = async (repos, user, attemptId, body, clientContext = {}) => {
   let attempt = await repos.attemptRepo.findByIdAndStudent(attemptId, user.id);
   if (!attempt) {
-    // Distinguish "not yours" (403) from "does not exist" (404).
     const any = await repos.attemptRepo.findById(attemptId);
     if (!any) throw notFound('Attempt not found.');
     throw forbidden('This attempt belongs to another student.');
@@ -390,8 +580,6 @@ export const saveAnswer = async (repos, user, attemptId, body) => {
     attempt.status === 'in_progress' &&
     now.getTime() > expiryTime &&
     now.getTime() - expiryTime <= ANSWER_SAVE_GRACE_MS;
-  // A request already in flight at the deadline gets a short delivery grace
-  // period; after that, expiry is finalized before any answer validation.
   if (!withinGrace) attempt = await finalizeExpired(repos.attemptRepo, attempt, exam, now);
   if (attempt.status !== 'in_progress') {
     throw attempt.finalizedBy === 'expiry'
@@ -414,7 +602,11 @@ export const saveAnswer = async (repos, user, attemptId, body) => {
       throw fail(400, 'VALIDATION_ERROR', 'That option does not belong to this question.');
     }
   }
-  if (body.numericValue !== undefined && body.numericValue !== null && item.question.type !== 'numeric') {
+  if (
+    body.numericValue !== undefined &&
+    body.numericValue !== null &&
+    item.question.type !== 'numeric'
+  ) {
     throw fail(400, 'VALIDATION_ERROR', 'This is not a numeric question.');
   }
 
@@ -425,13 +617,19 @@ export const saveAnswer = async (repos, user, attemptId, body) => {
     ]);
   }
 
-  const savedAt = nowIso();
+  attempt = await evaluateServerProctoringSignals(repos, attempt, exam, clientContext, {
+    isAnswerSave: true,
+    now,
+  });
+
+  const savedAt = now.toISOString();
   const saved = await repos.attemptRepo.saveAnswerIfNewer(
     attempt.id,
     body.itemId,
     {
       selectedOptionIds: body.selectedOptionIds ?? previous?.selectedOptionIds ?? [],
-      numericValue: body.numericValue !== undefined ? body.numericValue : previous?.numericValue ?? null,
+      numericValue:
+        body.numericValue !== undefined ? body.numericValue : previous?.numericValue ?? null,
       markedForReview: body.markedForReview ?? previous?.markedForReview ?? false,
     },
     body.clientSeq,
@@ -443,6 +641,51 @@ export const saveAnswer = async (repos, user, attemptId, body) => {
     ]);
   }
   return { ...saved, serverTime: savedAt };
+};
+
+export const recordHeartbeat = async (repos, user, attemptId, clientContext = {}) => {
+  let attempt = await repos.attemptRepo.findByIdAndStudent(attemptId, user.id);
+  if (!attempt) {
+    const any = await repos.attemptRepo.findById(attemptId);
+    if (!any) throw notFound('Attempt not found.');
+    throw forbidden('This attempt belongs to another student.');
+  }
+  const exam = await loadExam(repos.examRepo, attempt.examId);
+  const now = new Date();
+  attempt = await finalizeExpired(repos.attemptRepo, attempt, exam, now);
+  if (attempt.status !== 'in_progress') {
+    throw attempt.finalizedBy === 'expiry'
+      ? fail(409, 'ATTEMPT_EXPIRED', 'This attempt has expired.')
+      : fail(409, 'INVALID_STATE', 'This attempt is no longer active.');
+  }
+
+  const updated = await evaluateServerProctoringSignals(repos, attempt, exam, clientContext, {
+    isAnswerSave: false,
+    now,
+  });
+
+  const settings = exam.settings || {};
+  const limit = settings.violationLimit ?? 0;
+  const reached =
+    limit > 0 && settings.autoSubmitOnViolation === true && updated.violations.length >= limit;
+  let finalAttempt = updated;
+  if (reached) {
+    const graded = gradeAttempt(updated.questionSet, updated.answers, gradeOptions(exam));
+    finalAttempt =
+      (await repos.attemptRepo.finalizeIfInProgress(updated.id, graded, {
+        submittedAt: now.toISOString(),
+        finalizedBy: 'violation',
+      })) || (await repos.attemptRepo.findById(updated.id));
+  }
+
+  return {
+    attemptId: finalAttempt.id,
+    status: finalAttempt.status,
+    violationCount: finalAttempt.violations.length,
+    maxViolations: limit,
+    autoSubmitted: reached && finalAttempt.status === 'submitted',
+    serverTime: now.toISOString(),
+  };
 };
 
 export const recordViolation = async (repos, user, attemptId, body) => {
@@ -463,6 +706,7 @@ export const recordViolation = async (repos, user, attemptId, body) => {
   const now = nowIso();
   const updated = await repos.attemptRepo.recordViolation(attempt.id, {
     type: body.type,
+    source: body.source || 'client',
     meta: body.meta || {},
     occurredAt: now,
   });
@@ -470,7 +714,8 @@ export const recordViolation = async (repos, user, attemptId, body) => {
 
   const settings = exam.settings || {};
   const limit = settings.violationLimit ?? 0;
-  const reached = limit > 0 && settings.autoSubmitOnViolation === true && updated.violations.length >= limit;
+  const reached =
+    limit > 0 && settings.autoSubmitOnViolation === true && updated.violations.length >= limit;
   let finalAttempt = updated;
   if (reached) {
     const graded = gradeAttempt(updated.questionSet, updated.answers, gradeOptions(exam));
@@ -488,7 +733,9 @@ export const recordViolation = async (repos, user, attemptId, body) => {
     maxViolations: limit,
     autoSubmitted: reached && finalAttempt.status === 'submitted',
     attemptStatus: finalAttempt.status,
-    ...(reached && finalAttempt.status === 'submitted' ? { submittedAt: finalAttempt.submittedAt } : {}),
+    ...(reached && finalAttempt.status === 'submitted'
+      ? { submittedAt: finalAttempt.submittedAt }
+      : {}),
     serverTime: now,
   };
 };
@@ -524,7 +771,9 @@ export const getAttempt = async (repos, user, attemptId) => {
   if (user.role === 'student') {
     if (attempt.studentId !== user.id) throw forbidden('This attempt belongs to another student.');
     const current = await finalizeExpired(repos.attemptRepo, attempt, exam);
-    return current.status === 'submitted' ? submittedSummary(current, exam) : attemptState(current, exam);
+    return current.status === 'submitted'
+      ? submittedSummary(current, exam)
+      : attemptState(current, exam);
   }
 
   assertExamOwner(user, exam);
@@ -570,10 +819,20 @@ export const getResult = async (repos, user, attemptId) => {
     }
     const payload = resultPayload(current, exam, { forStudent: true });
     const history = await repos.attemptRepo.listByStudent(user.id);
+    const submittedEntries = history.filter(
+      (entry) => entry.status === 'submitted' && entry.gradedPayload,
+    );
+
+    const uniqueExamIds = [...new Set(submittedEntries.map((entry) => entry.examId))];
+    const historyExams =
+      typeof repos.examRepo.findByIds === 'function'
+        ? await repos.examRepo.findByIds(uniqueExamIds)
+        : await Promise.all(uniqueExamIds.map((examId) => repos.examRepo.findById(examId)));
+    const examById = new Map(historyExams.filter(Boolean).map((entryExam) => [entryExam.id, entryExam]));
+
     const released = [];
-    for (const entry of history) {
-      if (entry.status !== 'submitted' || !entry.gradedPayload) continue;
-      const entryExam = await repos.examRepo.findById(entry.examId);
+    for (const entry of submittedEntries) {
+      const entryExam = examById.get(entry.examId);
       if (!entryExam || !resultAvailability(entryExam, entry).available) continue;
       released.push({
         examId: entryExam.id,
@@ -601,14 +860,44 @@ export const getResult = async (repos, user, attemptId) => {
 export const monitorExam = async (repos, user, examId, query) => {
   const exam = await loadExam(repos.examRepo, examId);
   assertExamOwner(user, exam);
-  await finalizeExpiredForExam(repos, exam);
+  const now = new Date();
+  await finalizeExpiredForExam(repos, exam, now);
 
   const students = [
     ...(await repos.userRepo.findStudentsInBatches(exam.assignment.batchIds)),
     ...(await repos.userRepo.findUsersWhoJoined(exam.id)),
   ].filter((student) => student.role === 'student' && student.isActive);
   const eligible = [...new Map(students.map((student) => [student.id, student])).values()];
-  const attempts = await repos.attemptRepo.listByExam(exam.id);
+  let attempts = await repos.attemptRepo.listByExam(exam.id);
+
+  // Server-side proctoring sweep for silent/offline students during live monitoring.
+  const heartbeatTimeoutSec =
+    exam.settings?.heartbeatTimeoutSeconds ?? config.HEARTBEAT_TIMEOUT_SECONDS ?? 90;
+  let updatedAny = false;
+  for (const attempt of attempts) {
+    if (attempt.status !== 'in_progress') continue;
+    const lastHb = attempt.clientSession?.lastHeartbeatAt || attempt.startedAt;
+    if (!lastHb) continue;
+    const gapSec = (now.getTime() - new Date(lastHb).getTime()) / 1000;
+    if (gapSec > heartbeatTimeoutSec) {
+      await repos.attemptRepo.recordViolation(attempt.id, {
+        type: 'heartbeat_missed',
+        source: 'server',
+        meta: { gapSeconds: Math.round(gapSec), thresholdSeconds: heartbeatTimeoutSec },
+        occurredAt: now.toISOString(),
+      });
+      if (typeof repos.attemptRepo.updateClientContext === 'function') {
+        await repos.attemptRepo.updateClientContext(attempt.id, {
+          lastHeartbeatAt: now.toISOString(),
+        });
+      }
+      updatedAny = true;
+    }
+  }
+  if (updatedAny) {
+    attempts = await repos.attemptRepo.listByExam(exam.id);
+  }
+
   const byStudent = new Map(attempts.map((attempt) => [attempt.studentId, attempt]));
 
   const rows = eligible.map((student) => monitorRow(student, byStudent.get(student.id)));
@@ -638,14 +927,18 @@ export const examResults = async (repos, user, examId, query) => {
 
   const submitted = await repos.attemptRepo.listSubmittedByExam(exam.id);
   const students = new Map(
-    (await repos.userRepo.findByIds(submitted.map((attempt) => attempt.studentId))).map((student) => [
-      student.id,
-      student,
-    ]),
+    (await repos.userRepo.findByIds(submitted.map((attempt) => attempt.studentId))).map(
+      (student) => [student.id, student],
+    ),
   );
   const needle = query.q?.toLowerCase();
   const rows = submitted
-    .map((attempt) => resultRow(students.get(attempt.studentId) || { id: attempt.studentId, name: '', email: '' }, attempt))
+    .map((attempt) =>
+      resultRow(
+        students.get(attempt.studentId) || { id: attempt.studentId, name: '', email: '' },
+        attempt,
+      ),
+    )
     .filter((row) => !needle || `${row.student.name} ${row.student.email}`.toLowerCase().includes(needle))
     .sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime());
 
@@ -679,10 +972,9 @@ export const exportResults = async (repos, user, examId) => {
 
   const submitted = await repos.attemptRepo.listSubmittedByExam(exam.id);
   const students = new Map(
-    (await repos.userRepo.findByIds(submitted.map((attempt) => attempt.studentId))).map((student) => [
-      student.id,
-      student,
-    ]),
+    (await repos.userRepo.findByIds(submitted.map((attempt) => attempt.studentId))).map(
+      (student) => [student.id, student],
+    ),
   );
   const rows = submitted
     .map((attempt) => {

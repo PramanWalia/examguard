@@ -18,8 +18,19 @@ authRouter.post(
   validate(registerSchema),
   asyncHandler(async (req, res) => {
     const session = await authService.register(req.app.locals.repos.userRepo, req.body);
-    res.cookie('refreshToken', session.refreshToken, refreshCookieOptions());
-    ok(res, { user: session.user, accessToken: session.accessToken }, undefined, 201);
+    if (session.refreshToken) {
+      res.cookie('refreshToken', session.refreshToken, refreshCookieOptions());
+    }
+    ok(
+      res,
+      {
+        user: session.user,
+        accessToken: session.accessToken,
+        ...(session.pendingApproval ? { pendingApproval: true } : {}),
+      },
+      undefined,
+      201,
+    );
   }),
 );
 
@@ -38,7 +49,10 @@ authRouter.post(
   '/refresh',
   authLimiter,
   asyncHandler(async (req, res) => {
-    const session = await authService.refresh(req.app.locals.repos.userRepo, req.cookies?.refreshToken);
+    const session = await authService.refresh(
+      req.app.locals.repos.userRepo,
+      req.cookies?.refreshToken,
+    );
     res.cookie('refreshToken', session.refreshToken, refreshCookieOptions());
     ok(res, { accessToken: session.accessToken });
   }),
@@ -48,7 +62,7 @@ authRouter.post(
   '/logout',
   requireAuth,
   asyncHandler(async (req, res) => {
-    await authService.logout(req.app.locals.repos.userRepo, req.user.id);
+    await authService.logout(req.app.locals.repos.userRepo, req.user.id, req.authPayload?.sid);
     res.clearCookie('refreshToken', clearRefreshCookieOptions());
     ok(res, { message: 'Logged out.' });
   }),

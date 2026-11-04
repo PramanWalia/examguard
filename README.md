@@ -9,8 +9,8 @@ Built with React · Express · MongoDB
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7%2B-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![License](https://img.shields.io/badge/License-Private-red)](#)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
@@ -32,7 +32,7 @@ ExamGuard is an online exam platform where **teachers** create and manage exams,
 
 ### 👨‍🏫 For Teachers
 - Create & manage a **question bank** (single-choice, multi-choice, numeric)
-- **Import questions** from CSV/XLSX files
+- **Import questions** from CSV files
 - Build exams with **drag-and-drop** question ordering
 - Set **marks, negative marking, time limits, and batches**
 - **Monitor live exams** — see violation counts in real-time
@@ -55,9 +55,10 @@ ExamGuard is an online exam platform where **teachers** create and manage exams,
 <td colspan="2">
 
 ### 🔐 Security & Integrity
-- **Browser monitoring:** Detects tab switches, window blur, fullscreen exit, copy/paste, right-click, and keyboard shortcuts
+- **Browser & server-side monitoring:** Detects tab switches, window blur, fullscreen exit, copy/paste, right-click, keyboard shortcuts, missed heartbeats, long answer gaps, and IP/User-Agent shifts
 - **Server-authoritative time:** The server controls all timing — browser clocks can't be manipulated
-- **JWT authentication** with refresh-token rotation and version-based invalidation
+- **JWT authentication** with per-session (`sid` + `jti`) refresh-token rotation and replay detection
+- **Teacher registration gate:** Requires a faculty invite code or administrator approval before account activation
 - **Rate limiting, Helmet, CORS,** and bcrypt password hashing
 - **Idempotent submissions:** Submitting twice won't grade twice
 
@@ -133,11 +134,11 @@ flowchart LR
 
 | Layer | Technologies |
 |---|---|
-| **Frontend** | React 18, React Router, TanStack Query, React Hook Form, Zod, Zustand, Tailwind CSS, Recharts, dnd-kit, Vite, MSW |
-| **Backend** | Node.js 20+, Express, Mongoose, JWT, bcrypt, Helmet, CORS, Morgan, Multer, XLSX, node-cron |
+| **Frontend** | React 18, React Router, TanStack Query, React Hook Form, Zod, Zustand, Tailwind CSS 3.4, Recharts, dnd-kit, Vite, MSW |
+| **Backend** | Node.js 20+, Express, Mongoose, JWT, bcrypt, Helmet, CORS, Morgan, Multer, node-cron |
 | **Database** | MongoDB 7+ (or in-memory driver for development) |
 | **Testing** | Jest, Supertest, MongoDB Memory Server, Vitest, Testing Library, Playwright |
-| **Tooling** | ESLint, Prettier, npm workspaces |
+| **Tooling** | ESLint, Prettier, npm workspaces, GitHub Actions CI |
 
 ---
 
@@ -166,7 +167,7 @@ npm install
 cp server/.env.example server/.env
 ```
 
-The defaults work out of the box for local development. No changes needed!
+The defaults work out of the box for local development. Set `SEED_ON_START=true` in `server/.env` if you want demo fixtures automatically seeded on startup.
 
 ### 3. Start the App
 
@@ -191,7 +192,7 @@ npm run dev:client
 
 ### 5. Try it Out
 
-With `SEED_ON_START=true` (the default), the app comes pre-loaded with test data:
+When you run `npm run seed` or set `SEED_ON_START=true` in development, the app comes pre-loaded with test data:
 
 | Role | Email | Password |
 |---|---|---|
@@ -200,13 +201,13 @@ With `SEED_ON_START=true` (the default), the app comes pre-loaded with test data
 | Student | `student1@examguard.test` | `Student1234` |
 
 > [!NOTE]
-> These are **development-only** seed accounts. They are only created when `SEED_ON_START=true` and the in-memory driver is active. Never use seed credentials in production.
+> These are **development-only** seed accounts. `SEED_ON_START` and `REPOSITORY_DRIVER=memory` are strictly refused when `NODE_ENV=production`.
 
 ---
 
-## 🗄️ Using MongoDB (Optional)
+## 🗄️ Using MongoDB
 
-If you want persistent data that survives server restarts, switch to MongoDB:
+For persistent data (required in production), switch to MongoDB:
 
 ```dotenv
 # In server/.env, change these:

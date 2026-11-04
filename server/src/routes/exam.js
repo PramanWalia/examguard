@@ -117,7 +117,16 @@ examRouter.post(
   requireRole('student'),
   validate(paramsWithId, 'params'),
   asyncHandler(async (req, res) => {
-    const { attempt, exam, created } = await startAttempt(req.app.locals.repos, req.user, req.params.id);
+    const clientContext = {
+      ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null,
+      userAgent: req.get('user-agent') || null,
+    };
+    const { attempt, exam, created } = await startAttempt(
+      req.app.locals.repos,
+      req.user,
+      req.params.id,
+      clientContext,
+    );
     ok(res, attemptState(attempt, exam), undefined, created ? 201 : 200);
   }),
 );

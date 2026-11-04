@@ -2,32 +2,58 @@ import { newId, nowIso } from '../../utils/ids.js';
 
 const clone = (value) => structuredClone(value);
 
-const makeAttempt = (input) => ({
-  id: input.id || newId(),
-  examId: input.examId,
-  studentId: input.studentId,
-  status: input.status || 'in_progress',
-  startedAt: input.startedAt,
-  expiresAt: input.expiresAt,
-  submittedAt: input.submittedAt || null,
-  questionSet: clone(input.questionSet || []),
-  examSnapshot: clone(input.examSnapshot || {}),
-  answers: clone(input.answers || {}),
-  violations: clone(input.violations || []),
-  gradedPayload: input.gradedPayload || null,
-  finalizedBy: input.finalizedBy || null,
-  timeTakenSeconds: input.timeTakenSeconds ?? null,
-});
+export const computeTimeTakenSeconds = (startedAt, submittedAt, durationMinutes = 0) => {
+  if (!startedAt || !submittedAt) return 0;
+  const startMs = new Date(startedAt).getTime();
+  const endMs = new Date(submittedAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
+  const elapsed = Math.max(0, Math.round((endMs - startMs) / 1000));
+  const capSeconds = Math.max(0, Number(durationMinutes) || 0) * 60;
+  return capSeconds > 0 ? Math.min(elapsed, capSeconds) : elapsed;
+};
+
+const makeAttempt = (input) => {
+  const status = input.status === 'submitted' ? 'submitted' : 'in_progress';
+  const submittedAt = input.submittedAt || null;
+  const computedTimeTaken =
+    input.timeTakenSeconds !== undefined && input.timeTakenSeconds !== null
+      ? input.timeTakenSeconds
+      : status === 'submitted' && submittedAt
+        ? computeTimeTakenSeconds(
+            input.startedAt,
+            submittedAt,
+            input.examSnapshot?.durationMinutes,
+          )
+        : null;
+
+  return {
+    id: input.id || newId(),
+    examId: input.examId,
+    studentId: input.studentId,
+    status,
+    startedAt: input.startedAt,
+    expiresAt: input.expiresAt,
+    submittedAt,
+    questionSet: clone(input.questionSet || []),
+    examSnapshot: clone(input.examSnapshot || {}),
+    answers: clone(input.answers || {}),
+    violations: clone(input.violations || []),
+    clientSession: clone(
+      input.clientSession || {
+        ip: null,
+        userAgent: null,
+        lastHeartbeatAt: input.startedAt || null,
+        lastAnswerAt: null,
+      },
+    ),
+    gradedPayload: input.gradedPayload || null,
+    finalizedBy: input.finalizedBy || null,
+    timeTakenSeconds: computedTimeTaken,
+  };
+};
 
 /**
  * In-memory attempt repository.
- *
- * The three invariants that matter are each one synchronous block:
- *  - createIfNoActive: count, check, insert.
- *  - saveAnswerIfNewer: compare clientSeq, then write.
- *  - finalizeIfInProgress: check status, then flip it.
- *
- * See repositories/interfaces.js for why this is only process-local safety.
  */
 export class MemoryAttemptRepository {
   constructor() {
@@ -47,9 +73,10 @@ export class MemoryAttemptRepository {
     );
     const active = existing.find((attempt) => attempt.status === 'in_progress');
     if (active) return { attempt: clone(active), created: false, reason: 'in_progress' };
-    if (existing.length >= maxAttempts) return { attempt: null, created: false, reason: 'max_attempts' };
+    if (existing.length >= maxAttempts) {
+      return { attempt: null, created: false, reason: 'max_attempts' };
+    }
 
-    // No await between the checks above and the insert below.
     const attempt = makeAttempt({ ...data, examId, studentId });
     this._attempts.set(attempt.id, attempt);
     return { attempt: clone(attempt), created: true };
@@ -66,9 +93,10 @@ export class MemoryAttemptRepository {
   }
 
   async findByExamAndStudent(examId, studentId) {
-    const attempt = Array.from(this._attempts.values()).find(
+    const matching = Array.from(this._attempts.values()).filter(
       (entry) => entry.examId === examId && entry.studentId === studentId,
     );
+    const attempt = matching.at(-1);
     return attempt ? clone(attempt) : null;
   }
 
@@ -96,7 +124,6 @@ export class MemoryAttemptRepository {
     const existing = attempt.answers[itemId];
     if (existing && clientSeq <= existing.clientSeq) return null;
 
-    // No await between the stale check and the write.
     const stored = {
       itemId,
       selectedOptionIds: [...(answer.selectedOptionIds || [])],
@@ -106,7 +133,22 @@ export class MemoryAttemptRepository {
       updatedAt: now,
     };
     attempt.answers[itemId] = stored;
+    attempt.clientSession = {
+      ...(attempt.clientSession || {}),
+      lastAnswerAt: now,
+      lastHeartbeatAt: now,
+    };
     return clone(stored);
+  }
+
+  async updateClientContext(id, patch) {
+    const attempt = this._attempts.get(id);
+    if (!attempt || attempt.status !== 'in_progress') return null;
+    attempt.clientSession = {
+      ...(attempt.clientSession || {}),
+      ...patch,
+    };
+    return clone(attempt);
   }
 
   async recordViolation(id, violation, { cap = 100 } = {}) {
@@ -114,10 +156,10 @@ export class MemoryAttemptRepository {
     if (!attempt || attempt.status !== 'in_progress') return null;
     const entry = {
       type: violation.type,
+      source: violation.source || 'client',
       meta: clone(violation.meta || {}),
       occurredAt: violation.occurredAt || nowIso(),
     };
-    // Keep the newest evidence when the cap is reached.
     attempt.violations = [...attempt.violations, entry].slice(-cap);
     return clone(attempt);
   }
@@ -126,16 +168,19 @@ export class MemoryAttemptRepository {
     const attempt = this._attempts.get(id);
     if (!attempt || attempt.status !== 'in_progress') return null;
 
-    // No await between the status check above and the transition below.
     const endedAt = submittedAt || nowIso();
-    const elapsed = Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(attempt.startedAt).getTime()) / 1000));
+    const timeTakenSeconds = computeTimeTakenSeconds(
+      attempt.startedAt,
+      endedAt,
+      attempt.examSnapshot?.durationMinutes,
+    );
     const updated = {
       ...attempt,
       status: 'submitted',
       submittedAt: endedAt,
       gradedPayload: clone(gradedPayload),
       finalizedBy,
-      timeTakenSeconds: Math.min(elapsed, Math.max(0, attempt.examSnapshot?.durationMinutes || 0) * 60 || elapsed),
+      timeTakenSeconds,
     };
     this._attempts.set(id, updated);
     return clone(updated);
@@ -144,9 +189,24 @@ export class MemoryAttemptRepository {
   async findExpiredInProgress(now, limit = 100) {
     const cutoff = new Date(now).getTime();
     return Array.from(this._attempts.values())
-      .filter((attempt) => attempt.status === 'in_progress' && new Date(attempt.expiresAt).getTime() <= cutoff)
+      .filter(
+        (attempt) =>
+          attempt.status === 'in_progress' && new Date(attempt.expiresAt).getTime() <= cutoff,
+      )
       .sort((left, right) => left.expiresAt.localeCompare(right.expiresAt))
       .slice(0, limit)
+      .map(clone);
+  }
+
+  async findExpiredInProgressByExam(examId, now) {
+    const cutoff = new Date(now).getTime();
+    return Array.from(this._attempts.values())
+      .filter(
+        (attempt) =>
+          attempt.examId === examId &&
+          attempt.status === 'in_progress' &&
+          new Date(attempt.expiresAt).getTime() <= cutoff,
+      )
       .map(clone);
   }
 

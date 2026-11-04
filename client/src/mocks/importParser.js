@@ -18,19 +18,89 @@ export class ImportFileError extends Error {
   }
 }
 
-const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, '');
+const normalizeHeader = (value) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+
+export const parseCsvRows = (rawText) => {
+  const raw = String(rawText ?? '');
+  if (raw.includes('\u0000')) {
+    throw new Error('Binary content is not valid CSV.');
+  }
+
+  const text = raw.replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      if (cell.length > 0) {
+        throw new Error('Unexpected quote inside unquoted CSV field.');
+      }
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\r' || ch === '\n') {
+      if (ch === '\r' && text[i + 1] === '\n') {
+        i += 1;
+      }
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+
+  if (inQuotes) {
+    throw new Error('Unclosed quoted field in CSV.');
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows.filter((entry) => entry.some((value) => String(value ?? '').trim() !== ''));
+};
 
 /**
- * The mock uses the same `xlsx` reader the backend will use. It accepts CSV and
- * XLSX so the import dialog can be exercised without a server.
+ * RFC-4180 CSV reader aligned with server/src/utils/csv.js (no vulnerable xlsx dependency).
  */
 export const parseImportFile = async (file) => {
-  const XLSX = await import('xlsx');
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new ImportFileError('IMPORT_VALIDATION_FAILED', 'The workbook has no sheets.');
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' });
-  if (!rows.length) throw new ImportFileError('IMPORT_VALIDATION_FAILED', 'The file is empty.');
+  let rows;
+  try {
+    const text = typeof file.text === 'function' ? await file.text() : '';
+    rows = parseCsvRows(text);
+  } catch {
+    throw new ImportFileError('IMPORT_VALIDATION_FAILED', 'The import file could not be read.');
+  }
+
+  if (!rows.length) {
+    throw new ImportFileError('IMPORT_VALIDATION_FAILED', 'The file is empty.');
+  }
 
   const headers = rows[0].map(normalizeHeader);
   const missing = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
@@ -73,9 +143,10 @@ export const parseImportFile = async (file) => {
             : Number(record.numericanswer),
         explanation: String(record.explanation ?? '').trim(),
         defaultMarks: Number(record.defaultmarks),
-        negativeMarks: record.negativemarks === '' || record.negativemarks === undefined
-          ? 0
-          : Number(record.negativemarks),
+        negativeMarks:
+          record.negativemarks === '' || record.negativemarks === undefined
+            ? 0
+            : Number(record.negativemarks),
       },
     };
   });

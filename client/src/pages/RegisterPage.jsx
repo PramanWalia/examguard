@@ -12,9 +12,14 @@ import { AuthShell } from './AuthShell';
 
 const registerSchema = z
   .object({
-    name: z.string().trim().min(2, 'Name must be at least 2 characters.').max(80, 'Name is too long.'),
+    name: z
+      .string()
+      .trim()
+      .min(2, 'Name must be at least 2 characters.')
+      .max(80, 'Name is too long.'),
     email: z.string().trim().email('Enter a valid email address.'),
     role: z.enum(['student', 'teacher']),
+    inviteCode: z.string().trim().max(64, 'Invite code is too long.').optional(),
     password: z
       .string()
       .min(8, 'Password must be at least 8 characters.')
@@ -33,31 +38,56 @@ export const RegisterPage = () => {
   const registerUser = useAuthStore((state) => state.register);
   const isLoading = useAuthStore((state) => state.isLoading);
   const [serverError, setServerError] = useState('');
+  const [pendingTeacherUser, setPendingTeacherUser] = useState(null);
+
   const {
     register,
     handleSubmit,
     setError,
+    watch,
     formState: { errors },
   } = useForm({
-    defaultValues: { role: 'student' },
+    defaultValues: { role: 'student', inviteCode: '' },
     resolver: zodResolver(registerSchema),
     mode: 'onBlur',
   });
 
-  const onSubmit = async ({ confirmPassword, ...values }) => {
+  const selectedRole = watch('role');
+
+  const onSubmit = async ({ confirmPassword, inviteCode, ...values }) => {
     setServerError('');
     try {
-      await registerUser(values);
+      const payload = {
+        ...values,
+        ...(values.role === 'teacher' && inviteCode?.trim()
+          ? { inviteCode: inviteCode.trim() }
+          : {}),
+      };
+      const result = await registerUser(payload);
+      if (result?.pendingApproval) {
+        setPendingTeacherUser(result.user);
+        return;
+      }
       navigate('/dashboard', { replace: true });
     } catch (error) {
       const apiError = getApiError(error);
       const fieldErrors = getFieldErrors(error);
       if (apiError.code === 'DUPLICATE_EMAIL') {
-        setError('email', { type: 'server', message: 'An account with this email already exists.' });
+        setError('email', {
+          type: 'server',
+          message: 'An account with this email already exists.',
+        });
+        return;
+      }
+      if (apiError.code === 'INVALID_INVITE_CODE') {
+        setError('inviteCode', {
+          type: 'server',
+          message: apiError.message,
+        });
         return;
       }
       Object.entries(fieldErrors).forEach(([field, message]) => {
-        if (['name', 'email', 'password', 'role'].includes(field)) {
+        if (['name', 'email', 'password', 'role', 'inviteCode'].includes(field)) {
           setError(field, { type: 'server', message });
         }
       });
@@ -65,9 +95,34 @@ export const RegisterPage = () => {
     }
   };
 
+  if (pendingTeacherUser) {
+    return (
+      <AuthShell
+        description="Teacher accounts without an invite code require administrator verification before they can sign in."
+        footer={
+          <p>
+            Ready to check your account?{' '}
+            <Link className="link" to="/login">
+              Return to sign in
+            </Link>
+          </p>
+        }
+        kicker="Approval required"
+        title="Teacher account pending approval."
+      >
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+          <p className="font-semibold">Request submitted for {pendingTeacherUser.email}</p>
+          <p className="mt-1 text-amber-800 dark:text-amber-300">
+            An administrator must activate your teacher account from the Users console before you can create exams or questions.
+          </p>
+        </div>
+      </AuthShell>
+    );
+  }
+
   return (
     <AuthShell
-      description="Create a student or teacher account. Admin accounts are provisioned by the platform."
+      description="Create a student or teacher account. Teacher registrations require an invite code or administrator approval."
       footer={
         <p>
           Already have an account?{' '}
@@ -85,7 +140,13 @@ export const RegisterPage = () => {
         </Field>
 
         <Field error={errors.email?.message} htmlFor="email" label="Email address">
-          <Input autoComplete="email" id="email" placeholder="you@example.com" type="email" {...register('email')} />
+          <Input
+            autoComplete="email"
+            id="email"
+            placeholder="you@example.com"
+            type="email"
+            {...register('email')}
+          />
         </Field>
 
         <Field error={errors.role?.message} htmlFor="role" label="I am a">
@@ -94,6 +155,22 @@ export const RegisterPage = () => {
             <option value="teacher">Teacher</option>
           </Select>
         </Field>
+
+        {selectedRole === 'teacher' && (
+          <Field
+            error={errors.inviteCode?.message}
+            hint="Leave blank to submit your teacher account for administrator approval."
+            htmlFor="inviteCode"
+            label="Teacher invite code (optional)"
+          >
+            <Input
+              autoComplete="off"
+              id="inviteCode"
+              placeholder="Enter invite code if provided"
+              {...register('inviteCode')}
+            />
+          </Field>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field error={errors.password?.message} htmlFor="password" label="Password">
@@ -105,7 +182,11 @@ export const RegisterPage = () => {
               {...register('password')}
             />
           </Field>
-          <Field error={errors.confirmPassword?.message} htmlFor="confirmPassword" label="Confirm password">
+          <Field
+            error={errors.confirmPassword?.message}
+            htmlFor="confirmPassword"
+            label="Confirm password"
+          >
             <Input
               autoComplete="new-password"
               id="confirmPassword"

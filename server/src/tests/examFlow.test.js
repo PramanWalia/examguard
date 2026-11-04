@@ -380,5 +380,78 @@ describe('exam lifecycle', () => {
     const result = await request(app).get(`${API}/attempts/${attemptId}/result`).set(bearer(student));
     expect(result.body.data.score).toBe(4);
     expect(result.body.data.maxScore).toBe(6);
+    expect(typeof result.body.data.timeTakenSeconds).toBe('number');
+  });
+
+  it('records server-side proctoring signals (user_agent_change, heartbeat_missed, long_answer_gap) and responds to heartbeats', async () => {
+    const { app, repos, teacher, student } = await setup();
+    const question = await createQuestion(app, teacher);
+    const { exam } = await publishExam(app, teacher, [question.id], {
+      resultMode: 'immediate',
+      settings: { passPercentage: 40, violationLimit: 5, autoSubmitOnViolation: false },
+    });
+
+    const started = await request(app)
+      .post(`${API}/exams/${exam.id}/start`)
+      .set(bearer(student))
+      .set('User-Agent', 'ExamBrowser/1.0');
+    expect(started.status).toBe(201);
+    const attemptId = started.body.data.attemptId;
+    const itemId = started.body.data.questions[0].id;
+
+    // Simulate a missed heartbeat gap (>45s) and a changed User-Agent on the next heartbeat.
+    const stored = repos.attemptRepo._attempts.get(attemptId);
+    stored.clientSession.lastHeartbeatAt = new Date(Date.now() - 120_000).toISOString();
+    stored.clientSession.lastAnswerAt = new Date(Date.now() - 400_000).toISOString();
+
+    const heartbeat = await request(app)
+      .post(`${API}/attempts/${attemptId}/heartbeat`)
+      .set(bearer(student))
+      .set('User-Agent', 'SecondDevice/2.0')
+      .send({ visibilityState: 'visible' });
+    expect(heartbeat.status).toBe(200);
+    expect(heartbeat.body.data.violationCount).toBeGreaterThanOrEqual(2);
+
+    const saved = await request(app)
+      .patch(`${API}/attempts/${attemptId}/answer`)
+      .set(bearer(student))
+      .set('User-Agent', 'SecondDevice/2.0')
+      .send({ itemId, selectedOptionIds: ['a'], clientSeq: 1 });
+    expect(saved.status).toBe(200);
+
+    const updatedAttempt = await repos.attemptRepo.findById(attemptId);
+    const types = updatedAttempt.violations.map((v) => v.type);
+    expect(types).toEqual(expect.arrayContaining(['heartbeat_missed', 'user_agent_change', 'long_answer_gap']));
+  });
+
+  it('paginates availableExams in the repository without dropping eligible exams beyond the first 100', async () => {
+    const { app, repos, teacher, student } = await setup();
+    const startAt = new Date(Date.now() - 60_000).toISOString();
+    const endAt = new Date(Date.now() + 3_600_000).toISOString();
+
+    for (let i = 0; i < 105; i += 1) {
+      await repos.examRepo.create({
+        title: `Ineligible Exam ${i}`,
+        status: 'published',
+        durationMinutes: 30,
+        startAt,
+        endAt,
+        createdBy: '507f1f77bcf86cd799439011',
+        assignment: { batchIds: ['OTHER-BATCH'], joinCodeEnabled: false },
+        items: [{ id: `item-${i}`, questionId: '507f1f77bcf86cd799439012', order: 1, marks: 2, negativeMarks: 0, snapshot: { prompt: 'Q', type: 'single_choice', options: [{ id: 'a', text: 'A' }], correctOptionIds: ['a'] } }],
+        totalMarks: 2,
+      });
+    }
+
+    const question = await createQuestion(app, teacher);
+    const { exam } = await publishExam(app, teacher, [question.id], {
+      assignment: { batchIds: ['CSE-A'], joinCodeEnabled: false },
+    });
+
+    const available = await request(app).get(`${API}/exams/available`).set(bearer(student));
+    expect(available.status).toBe(200);
+    expect(available.body.data.map((e) => e.id)).toContain(exam.id);
+    expect(available.body.meta.total).toBe(1);
   });
 });
+

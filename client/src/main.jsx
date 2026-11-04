@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from 'react';
+import { lazy, StrictMode, Suspense, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
@@ -6,12 +6,20 @@ import { Toaster } from 'react-hot-toast';
 
 import { AppRoutes } from './components/AppRoutes';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DevToolsPanel } from './mocks/DevToolsPanel';
 import { useAuthStore } from './store/authStore';
 import './styles.css';
 
 // In development, mock API is opt-in via VITE_USE_MOCK=true. In production, always false.
-const useMockApi = import.meta.env.MODE !== 'production' && import.meta.env.VITE_USE_MOCK === 'true';
+const useMockApi =
+  import.meta.env.MODE !== 'production' && import.meta.env.VITE_USE_MOCK === 'true';
+
+const LazyDevToolsPanel = useMockApi
+  ? lazy(() =>
+      import('./mocks/DevToolsPanel').then((module) => ({
+        default: module.DevToolsPanel,
+      })),
+    )
+  : null;
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,7 +52,11 @@ const App = () => (
       <ErrorBoundary>
         <SessionBootstrapper>
           <AppRoutes />
-          {useMockApi && <DevToolsPanel />}
+          {LazyDevToolsPanel && (
+            <Suspense fallback={null}>
+              <LazyDevToolsPanel />
+            </Suspense>
+          )}
         </SessionBootstrapper>
       </ErrorBoundary>
     </BrowserRouter>

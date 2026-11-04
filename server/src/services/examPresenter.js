@@ -199,6 +199,7 @@ export const monitorRow = (student, attempt) => ({
   violationSummary: violationSummary(attempt),
   violations: (attempt?.violations || []).map((violation) => ({
     type: violation.type,
+    source: violation.source || 'client',
     meta: violation.meta || {},
     occurredAt: violation.occurredAt,
   })),

@@ -8,12 +8,14 @@
     "client"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace server",
-    "dev:client": "npm run dev --workspace client",
-    "build": "npm run build --workspace client",
+    "dev": "npm run dev --workspace @examguard/server",
+    "dev:client": "npm run dev --workspace @examguard/client",
+    "build": "npm run build --workspace @examguard/client",
     "lint": "npm run lint --workspaces",
     "format": "npm run format --workspaces",
-    "test": "npm run test --workspace server"
+    "test": "npm run test --workspace @examguard/server",
+    "test:mongo": "npm run test:mongo --workspace @examguard/server",
+    "test:client": "npm run test --workspace @examguard/client"
   },
   "engines": {
     "node": ">=20.0.0"

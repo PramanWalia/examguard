@@ -102,7 +102,6 @@ export const useAutosave = (
           const [itemId, entry] = queueRef.current.entries().next().value;
           let attempt = 0;
 
-          // eslint-disable-next-line no-constant-condition
           while (true) {
             try {
               const serverAnswer = await saveAnswerRef.current(attemptId, {

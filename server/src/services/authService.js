@@ -1,21 +1,32 @@
+import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcrypt';
 
 import { config } from '../config/env.js';
 import { DuplicateEmailError } from '../repositories/errors.js';
-import { badRequest, conflict, unauthorized } from '../utils/errors.js';
+import { AppError, badRequest, conflict, unauthorized } from '../utils/errors.js';
 import { publicUser } from '../utils/publicUser.js';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/tokens.js';
+import {
+  newSessionIdentifiers,
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} from '../utils/tokens.js';
 
-/**
- * Auth business logic. Controllers/routes own cookies and status codes; this
- * module owns credentials and token rotation.
- */
+const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-const session = (user) => ({
-  user: publicUser(user),
-  accessToken: signAccessToken(user),
-  refreshToken: signRefreshToken(user),
-});
+const createSession = async (userRepo, user) => {
+  const { sid, jti } = newSessionIdentifiers();
+  const expiresAt = new Date(Date.now() + REFRESH_TTL_MS).toISOString();
+  if (typeof userRepo.createSession === 'function') {
+    await userRepo.createSession(user.id, { sid, jti, expiresAt });
+  }
+  return {
+    user: publicUser(user),
+    accessToken: signAccessToken(user, { sid, jti }),
+    refreshToken: signRefreshToken(user, { sid, jti }),
+    pendingApproval: false,
+  };
+};
 
 export const register = async (userRepo, input) => {
   if (!['student', 'teacher'].includes(input.role)) {
@@ -23,6 +34,28 @@ export const register = async (userRepo, input) => {
       { path: 'role', message: 'Self-registration only allows student or teacher.' },
     ]);
   }
+
+  let isActive = true;
+  let approvalStatus = 'approved';
+
+  if (input.role === 'teacher') {
+    const inviteCode = String(input.inviteCode || '').trim();
+    if (inviteCode) {
+      if (!config.TEACHER_INVITE_CODE || inviteCode !== config.TEACHER_INVITE_CODE) {
+        throw new AppError(
+          403,
+          'INVALID_INVITE_CODE',
+          'Invalid teacher invite code. Leave blank to request administrator approval.',
+        );
+      }
+      isActive = true;
+      approvalStatus = 'approved';
+    } else {
+      isActive = false;
+      approvalStatus = 'pending';
+    }
+  }
+
   const passwordHash = await bcrypt.hash(input.password, config.BCRYPT_ROUNDS);
   let user;
   try {
@@ -31,7 +64,8 @@ export const register = async (userRepo, input) => {
       email: input.email,
       passwordHash,
       role: input.role,
-      isActive: true,
+      isActive,
+      approvalStatus,
     });
   } catch (error) {
     if (error instanceof DuplicateEmailError) {
@@ -39,17 +73,26 @@ export const register = async (userRepo, input) => {
     }
     throw error;
   }
-  return session(user);
+
+  if (!user.isActive) {
+    return {
+      user: publicUser(user),
+      accessToken: null,
+      refreshToken: null,
+      pendingApproval: true,
+    };
+  }
+
+  return createSession(userRepo, user);
 };
 
 export const login = async (userRepo, { email, password }) => {
   const user = await userRepo.findByEmail(email);
   const matches = user ? await bcrypt.compare(password, user.passwordHash) : false;
-  // Deliberately identical for unknown email, wrong password, and inactive account.
   if (!user || !matches || !user.isActive) {
     throw unauthorized('Email or password is incorrect, or the account is inactive.');
   }
-  return session(user);
+  return createSession(userRepo, user);
 };
 
 export const refresh = async (userRepo, refreshToken) => {
@@ -60,15 +103,42 @@ export const refresh = async (userRepo, refreshToken) => {
   } catch {
     throw unauthorized('Your session has expired. Sign in again.');
   }
+
   const user = await userRepo.findById(payload.sub);
   if (!user || !user.isActive || user.tokenVersion !== payload.tv) {
     throw unauthorized('Your session has expired. Sign in again.');
   }
-  // Rotation: the presented token (tv) stops working once the version increments.
+
+  if (payload.sid && payload.jti && typeof userRepo.rotateSession === 'function') {
+    const nextJti = randomUUID();
+    const expiresAt = new Date(Date.now() + REFRESH_TTL_MS).toISOString();
+    const rotatedSession = await userRepo.rotateSession(
+      user.id,
+      payload.sid,
+      payload.jti,
+      nextJti,
+      expiresAt,
+    );
+    if (!rotatedSession) {
+      // Replay of an already-rotated token invalidates this session family.
+      await userRepo.revokeSession(user.id, payload.sid);
+      throw unauthorized('Your session has expired. Sign in again.');
+    }
+    return {
+      user: publicUser(user),
+      accessToken: signAccessToken(user, { sid: payload.sid, jti: nextJti }),
+      refreshToken: signRefreshToken(user, { sid: payload.sid, jti: nextJti }),
+    };
+  }
+
   const rotated = await userRepo.incrementTokenVersion(user.id);
-  return session(rotated);
+  return createSession(userRepo, rotated);
 };
 
-export const logout = async (userRepo, userId) => {
+export const logout = async (userRepo, userId, sid = null) => {
+  if (sid && typeof userRepo.revokeSession === 'function') {
+    await userRepo.revokeSession(userId, sid);
+    return;
+  }
   await userRepo.incrementTokenVersion(userId);
 };

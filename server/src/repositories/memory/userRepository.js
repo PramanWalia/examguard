@@ -3,10 +3,10 @@ import { paginate } from '../../utils/pagination.js';
 import { DuplicateEmailError } from '../errors.js';
 
 const clone = (value) => structuredClone(value);
+const MAX_SESSIONS_PER_USER = 20;
 
 /**
- * In-memory user repository. See repositories/interfaces.js for the contract and
- * the atomicity note. Every check-and-write below is synchronous on purpose.
+ * In-memory user repository.
  */
 export class MemoryUserRepository {
   constructor() {
@@ -20,15 +20,22 @@ export class MemoryUserRepository {
     const email = String(input.email || '').trim().toLowerCase();
     if (this._emailIndex.has(email)) throw new DuplicateEmailError();
     const timestamp = nowIso();
+    const isActive = input.isActive !== undefined ? Boolean(input.isActive) : true;
+    const role = input.role || 'student';
+    const approvalStatus =
+      input.approvalStatus || (!isActive && role === 'teacher' ? 'pending' : 'approved');
+
     const user = {
       id: newId(),
       name: String(input.name || '').trim(),
       email,
-      role: input.role || 'student',
+      role,
       batchIds: [...(input.batchIds || [])],
-      isActive: input.isActive !== undefined ? Boolean(input.isActive) : true,
+      isActive,
+      approvalStatus,
       passwordHash: input.passwordHash,
       tokenVersion: 0,
+      sessions: [...(input.sessions || [])],
       joinedExamIds: [...(input.joinedExamIds || [])],
       createdAt: input.createdAt || timestamp,
       updatedAt: input.updatedAt || timestamp,
@@ -56,13 +63,21 @@ export class MemoryUserRepository {
   async updateById(id, patch) {
     const user = this._users.get(id);
     if (!user) return null;
-    // No await between the read above and the write below.
+    const nextIsActive = patch.isActive !== undefined ? Boolean(patch.isActive) : user.isActive;
+    const nextApprovalStatus =
+      patch.approvalStatus !== undefined
+        ? patch.approvalStatus
+        : nextIsActive && user.approvalStatus === 'pending'
+          ? 'approved'
+          : user.approvalStatus;
+
     const updated = {
       ...user,
       ...(patch.name !== undefined && { name: String(patch.name).trim() }),
       ...(patch.role !== undefined && { role: patch.role }),
       ...(patch.batchIds !== undefined && { batchIds: [...patch.batchIds] }),
-      ...(patch.isActive !== undefined && { isActive: Boolean(patch.isActive) }),
+      ...(patch.isActive !== undefined && { isActive: nextIsActive }),
+      approvalStatus: nextApprovalStatus,
       ...(patch.passwordHash !== undefined && { passwordHash: patch.passwordHash }),
       updatedAt: nowIso(),
     };
@@ -81,9 +96,72 @@ export class MemoryUserRepository {
   async incrementTokenVersion(id) {
     const user = this._users.get(id);
     if (!user) return null;
-    const updated = { ...user, tokenVersion: user.tokenVersion + 1, updatedAt: nowIso() };
+    const updated = {
+      ...user,
+      tokenVersion: user.tokenVersion + 1,
+      sessions: [],
+      updatedAt: nowIso(),
+    };
     this._users.set(id, updated);
     return clone(updated);
+  }
+
+  async createSession(userId, { sid, jti, expiresAt }) {
+    const user = this._users.get(userId);
+    if (!user) return null;
+    const now = nowIso();
+    const record = {
+      sid,
+      jti,
+      createdAt: now,
+      expiresAt,
+      revokedAt: null,
+    };
+    const activeSessions = (user.sessions || []).filter((entry) => !entry.revokedAt);
+    user.sessions = [...activeSessions, record].slice(-MAX_SESSIONS_PER_USER);
+    user.lastLoginAt = now;
+    user.updatedAt = now;
+    return clone(record);
+  }
+
+  async findSession(userId, sid) {
+    const user = this._users.get(userId);
+    if (!user || !sid) return null;
+    const session = (user.sessions || []).find((entry) => entry.sid === sid);
+    return session ? clone(session) : null;
+  }
+
+  async rotateSession(userId, sid, expectedJti, newJti, expiresAt) {
+    const user = this._users.get(userId);
+    if (!user || !sid) return null;
+    const index = (user.sessions || []).findIndex(
+      (entry) => entry.sid === sid && entry.jti === expectedJti && !entry.revokedAt,
+    );
+    if (index < 0) return null;
+    const updatedSession = {
+      ...user.sessions[index],
+      jti: newJti,
+      expiresAt: expiresAt || user.sessions[index].expiresAt,
+    };
+    user.sessions[index] = updatedSession;
+    user.updatedAt = nowIso();
+    return clone(updatedSession);
+  }
+
+  async revokeSession(userId, sid) {
+    const user = this._users.get(userId);
+    if (!user) return false;
+    if (!sid) {
+      user.tokenVersion += 1;
+      user.sessions = [];
+      user.updatedAt = nowIso();
+      return true;
+    }
+    const session = (user.sessions || []).find((entry) => entry.sid === sid);
+    if (!session) return false;
+    session.revokedAt = nowIso();
+    user.updatedAt = nowIso();
+    return true;
   }
 
   async addJoinedExam(id, examId) {
@@ -133,7 +211,9 @@ export class MemoryUserRepository {
     rows = [...rows].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
     const { data, meta } = paginate(rows.map(clone), page, limit);
-    const batches = [...new Set(all.flatMap((user) => user.batchIds))].sort().map((id) => ({ id, name: id }));
+    const batches = [...new Set(all.flatMap((user) => user.batchIds))]
+      .sort()
+      .map((id) => ({ id, name: id }));
 
     return {
       data,
@@ -143,6 +223,9 @@ export class MemoryUserRepository {
           total: all.length,
           active: all.filter((user) => user.isActive).length,
           inactive: all.filter((user) => !user.isActive).length,
+          pendingTeachers: all.filter(
+            (user) => user.role === 'teacher' && !user.isActive,
+          ).length,
           roleCounts: {
             admin: all.filter((user) => user.role === 'admin').length,
             teacher: all.filter((user) => user.role === 'teacher').length,
