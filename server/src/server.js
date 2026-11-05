@@ -1,3 +1,4 @@
+import bcrypt from 'bcrypt';
 import { createApp } from './app.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
 import { config } from './config/env.js';
@@ -15,6 +16,22 @@ const start = async () => {
   }
 
   const repos = createRepositoryFactory(config.REPOSITORY_DRIVER);
+
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    const adminEmail = process.env.ADMIN_EMAIL.trim().toLowerCase();
+    const existing = await repos.userRepo.findByEmail(adminEmail);
+    if (!existing) {
+      const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, config.BCRYPT_ROUNDS);
+      await repos.userRepo.create({
+        name: process.env.ADMIN_NAME?.trim() || 'System Administrator',
+        email: adminEmail,
+        passwordHash,
+        role: 'admin',
+        isActive: true,
+      });
+      console.log(`Administrator ${adminEmail} initialized.`);
+    }
+  }
 
   if (config.SEED_ON_START) {
     if (config.NODE_ENV === 'production') {
