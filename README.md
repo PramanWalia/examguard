@@ -6,11 +6,16 @@
 
 Built with React · Express · MongoDB
 
+[![Live Frontend](https://img.shields.io/badge/Live_App-examguard--plum.vercel.app-blue?style=flat&logo=vercel)](https://examguard-plum.vercel.app)
+[![API Status](https://img.shields.io/badge/API_Status-Online-success?style=flat&logo=railway)](https://examguard-production-2ebb.up.railway.app/api/v1/health)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7%2B-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**🌐 Live Application:** [https://examguard-plum.vercel.app](https://examguard-plum.vercel.app)  
+**💚 API Health Check:** [https://examguard-production-2ebb.up.railway.app/api/v1/health](https://examguard-production-2ebb.up.railway.app/api/v1/health)
 
 </div>
 
@@ -194,15 +199,37 @@ npm run dev:client
 
 ExamGuard enforces secure, production-ready authentication:
 
-* **New Users (Students & Teachers):** Navigate to the login screen and click **Create an account** (or visit `/register`) to set up a new personal account. Teachers can optionally provide an invite code or register for administrator approval.
-* **Administrator:** Create or update your system administrator using the secure CLI tool:
-  ```bash
-  ADMIN_EMAIL="admin@yourdomain.com" ADMIN_PASSWORD="YourStrongPassword1!" npm run create-admin --workspace @examguard/server
-  ```
+* **New Users (Students & Teachers):** Navigate to the login screen and click **Create an account** (or visit `/register`) to set up a new personal account.
+* **Teacher Approval Flow:** Teachers can optionally provide an invite code or submit their account for administrator activation. Unapproved teachers cannot access questions or exams until an admin approves them.
+* **Administrator Role & Protection:** System administrators oversee the platform from the `/users` console:
+  - Approve or decline pending teacher accounts.
+  - Safely switch existing accounts between **Student** and **Teacher** roles (the administrator role is strictly protected and cannot be assigned via the dropdown).
+  - Provision or update an administrator account using environment variables (`ADMIN_EMAIL` and `ADMIN_PASSWORD`) or the CLI tool:
+    ```bash
+    ADMIN_EMAIL="admin@yourdomain.com" ADMIN_PASSWORD="YourStrongPassword1!" npm run create-admin --workspace @examguard/server
+    ```
 * **Private Demo Accounts:** For the repository owner, pre-configured demo and management credentials are stored in `PRIVATE_CREDENTIALS.md` (local only, protected by `.gitignore`).
 
 > [!NOTE]
-> Public demo credentials are never stored in production or repository documentation. Anyone else wanting to use the application must register their own account.
+> Public demo credentials are never stored in production or repository documentation. Anyone wanting to use the application must register their own account.
+
+---
+
+## ☁️ Production Cloud Deployment
+
+ExamGuard is live and deployed with automated GitHub CI/CD:
+
+| Component | Platform | Live URL / Target | Notes |
+|---|---|---|---|
+| **Frontend UI** | [Vercel](https://vercel.com/) | [https://examguard-plum.vercel.app](https://examguard-plum.vercel.app) | React 18 + Vite SPA, auto-proxies `/api` via `vercel.json` |
+| **Backend API** | [Railway](https://railway.app/) | [https://examguard-production-2ebb.up.railway.app](https://examguard-production-2ebb.up.railway.app) | Node.js + Express REST API, CORS & Helmet hardened |
+| **Database** | [Railway MongoDB](https://railway.app/) | `mongodb-volume` | Persistent cloud volume storage |
+
+### Continuous Deployment (CI/CD)
+Both Vercel and Railway automatically deploy whenever code is pushed to the `main` branch of this repository:
+```text
+Local commit ➔ git push origin main ➔ Vercel (Frontend) & Railway (Backend) auto-redeploy in ~30s
+```
 
 ---
 
@@ -217,15 +244,14 @@ MONGODB_URI=mongodb://127.0.0.1:27017/examguard
 SEED_ON_START=false
 ```
 
-Then create an admin account manually:
+Then create an admin account manually (or configure `ADMIN_EMAIL` & `ADMIN_PASSWORD` in your cloud variables):
 
 ```bash
-# Set environment variables, then run:
-ADMIN_EMAIL="your@email.com" ADMIN_PASSWORD="YourStrongPassword1" npm run create-admin --workspace server
+ADMIN_EMAIL="your@email.com" ADMIN_PASSWORD="YourStrongPassword1" npm run create-admin --workspace @examguard/server
 ```
 
 > [!IMPORTANT]
-> For production, you **must** set unique, strong `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values. The app will refuse to start with the development defaults when `NODE_ENV=production`.
+> For production, you **must** set unique, strong `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values (64-character hex strings). The app will refuse to start with the development defaults when `NODE_ENV=production`.
 
 ---
 
@@ -256,13 +282,13 @@ All endpoints are prefixed with `/api/v1`. Here's a quick summary:
 npm test
 
 # Run contract tests specifically
-npm run test:contract --workspace server
+npm run test:contract --workspace @examguard/server
 
 # Run MongoDB-specific tests (needs MongoDB running)
-npm run test:mongo --workspace server
+npm run test:mongo --workspace @examguard/server
 
 # Run frontend tests
-npm run test --workspace client
+npm run test --workspace @examguard/client
 
 # Lint all code
 npm run lint
@@ -365,10 +391,9 @@ examguard/
 ## ⚠️ Limitations & Future Work
 
 - **Browser proctoring ≠ proof of cheating.** Tab switches and copy/paste events are *signals* that support human review — they can be spoofed, blocked, or triggered by innocent actions. They should never be used for automated accusations.
-- **Local-first deployment.** Production would need CI/CD, managed MongoDB, secret management, observability, and horizontal scaling.
+- **Production Architecture:** Deployed live with Vercel (Edge CDN) + Railway (Containerized Express) + Railway persistent MongoDB volume. Further scaling would introduce horizontal auto-scaling and Redis session clustering.
 - **Analytics** can be optimized with materialized aggregates and background processing for larger cohorts.
 - **Accessibility & localization** should be expanded before institutional rollout.
-- A **hosted public demo** with temporary, non-privileged accounts is planned.
 
 ---
 

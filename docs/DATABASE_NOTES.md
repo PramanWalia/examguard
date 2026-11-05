@@ -5,11 +5,16 @@ Use `memory` for local UI work and `mongo` for persistent data. The Mongo
 driver uses the same repository interfaces, so controllers and services do
 not change when storage changes.
 
-## Local or Atlas setup
+## Production & Cloud Setup (Railway or MongoDB Atlas)
 
-1. Create a MongoDB Atlas free-tier cluster.
-2. Add the development IP address under **Network Access** (use a narrow
-   allowlist; do not use `0.0.0.0/0` outside a temporary local demo).
+### Option A: Railway (Recommended — 1-Click Provision)
+1. Add a **MongoDB** service to your Railway project canvas (uses persistent `mongodb-volume`).
+2. Link your backend service to `${{MongoDB.MONGO_URL}}` or use the provided connection URI.
+3. Railway manages persistence, automated restarts, and internal networking automatically.
+
+### Option B: MongoDB Atlas
+1. Create a MongoDB Atlas free-tier (M0) cluster.
+2. Add network access under **Network Access** (or `0.0.0.0/0` for cloud services like Render/Railway).
 3. Copy `server/.env.example` to `server/.env` and set:
 
    ```text
@@ -17,25 +22,17 @@ not change when storage changes.
    MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/<database>?retryWrites=true&w=majority
    ```
 
-4. Run `npm run seed --workspace server`. The seed is idempotent and prints
-   demo credentials.
-5. Start the API with `npm run dev --workspace server`.
-
-Enable Atlas backups (continuous cloud backup when available for the selected
-tier) before using production data. Test restoring a backup periodically;
-backups do not replace least-privilege users or application-level validation.
+Enable cloud backups before using sensitive production data. Test restoring backups periodically.
 
 ## Private administrator provisioning
 
-The seed does not create an administrator and no administrator credentials are
-stored in the repository. Create or rotate the private administrator from the
-server environment:
+Administrator credentials are never committed to source control or exposed in documentation. Provision an administrator in one of two ways:
 
-```powershell
-$env:ADMIN_EMAIL="your-private-email@example.com"
-$env:ADMIN_PASSWORD="a-long-random-password"
-npm run create-admin --workspace server
-```
+1. **Automatic Initialization on Startup:** Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in your production environment variables (e.g. Railway or Render variables tab). The API server auto-provisions the administrator on first boot if the account does not yet exist.
+2. **CLI Command:** Execute the management script directly:
+   ```bash
+   ADMIN_EMAIL="your-private-email@example.com" ADMIN_PASSWORD="a-long-random-password" npm run create-admin --workspace @examguard/server
+   ```
 
 Do not commit those environment variables or publish them in documentation.
 
