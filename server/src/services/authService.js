@@ -80,6 +80,8 @@ export const register = async (userRepo, input) => {
       accessToken: null,
       refreshToken: null,
       pendingApproval: true,
+      message:
+        'Teacher account registered and awaiting administrator approval. You will be able to log in once an admin activates your account.',
     };
   }
 
@@ -89,7 +91,15 @@ export const register = async (userRepo, input) => {
 export const login = async (userRepo, { email, password }) => {
   const user = await userRepo.findByEmail(email);
   const matches = user ? await bcrypt.compare(password, user.passwordHash) : false;
-  if (!user || !matches || !user.isActive) {
+  if (!user || !matches) {
+    throw unauthorized('Email or password is incorrect, or the account is inactive.');
+  }
+  if (!user.isActive) {
+    if (user.role === 'teacher') {
+      throw unauthorized(
+        'Your teacher account is pending administrator approval. Please wait for an admin to approve your account.',
+      );
+    }
     throw unauthorized('Email or password is incorrect, or the account is inactive.');
   }
   return createSession(userRepo, user);

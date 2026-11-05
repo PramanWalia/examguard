@@ -212,7 +212,13 @@ const authHandlers = [
       if (errors.length) return validationError(errors);
 
       const user = S.state.users.find((entry) => entry.email === body.email.trim().toLowerCase());
-      if (!user || user.password !== body.password || !user.isActive) {
+      if (!user || user.password !== body.password) {
+        return fail(401, 'UNAUTHORIZED', 'Email or password is incorrect.');
+      }
+      if (!user.isActive) {
+        if (user.role === 'teacher') {
+          return fail(401, 'UNAUTHORIZED', 'Your teacher account is pending administrator approval. Please wait for an admin to approve your account.');
+        }
         return fail(401, 'UNAUTHORIZED', 'Email or password is incorrect, or the account is inactive.');
       }
       S.state.currentUserId = user.id;

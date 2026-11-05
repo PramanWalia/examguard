@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 
 import { InlineError } from '../components/States';
-import { Field, Input, Select } from '../components/ui';
+import { EyeIcon, EyeOffIcon, Field, Input, Select } from '../components/ui';
 import { useAuthStore } from '../store/authStore';
 import { getApiError, getFieldErrors } from '../utils/errors';
 import { AuthShell } from './AuthShell';
@@ -38,6 +38,8 @@ export const RegisterPage = () => {
   const registerUser = useAuthStore((state) => state.register);
   const isLoading = useAuthStore((state) => state.isLoading);
   const [serverError, setServerError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [pendingTeacherUser, setPendingTeacherUser] = useState(null);
 
   const {
@@ -65,7 +67,7 @@ export const RegisterPage = () => {
       };
       const result = await registerUser(payload);
       if (result?.pendingApproval) {
-        setPendingTeacherUser(result.user);
+        setPendingTeacherUser(result.user || { email: values.email });
         return;
       }
       navigate('/dashboard', { replace: true });
@@ -110,11 +112,16 @@ export const RegisterPage = () => {
         kicker="Approval required"
         title="Teacher account pending approval."
       >
-        <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
-          <p className="font-semibold">Request submitted for {pendingTeacherUser.email}</p>
-          <p className="mt-1 text-amber-800 dark:text-amber-300">
-            An administrator must activate your teacher account from the Users console before you can create exams or questions.
-          </p>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+            <p className="font-semibold">Request submitted for {pendingTeacherUser.email}</p>
+            <p className="mt-1 text-amber-800 dark:text-amber-300">
+              An administrator must activate your teacher account from the Users console before you can create exams or questions.
+            </p>
+          </div>
+          <Link className="btn-primary block w-full text-center" to="/login">
+            Return to Sign In
+          </Link>
         </div>
       </AuthShell>
     );
@@ -166,7 +173,7 @@ export const RegisterPage = () => {
             <Input
               autoComplete="off"
               id="inviteCode"
-              placeholder="Enter invite code if provided"
+              placeholder="Optional invite code"
               {...register('inviteCode')}
             />
           </Field>
@@ -174,26 +181,50 @@ export const RegisterPage = () => {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field error={errors.password?.message} htmlFor="password" label="Password">
-            <Input
-              autoComplete="new-password"
-              id="password"
-              placeholder="8+ characters"
-              type="password"
-              {...register('password')}
-            />
+            <div className="relative">
+              <Input
+                autoComplete="new-password"
+                className="pr-16"
+                id="password"
+                placeholder="8+ characters"
+                type={showPassword ? 'text' : 'password'}
+                {...register('password')}
+              />
+              <button
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute inset-y-0 right-2 my-auto flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => setShowPassword((prev) => !prev)}
+                type="button"
+              >
+                {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+                <span>{showPassword ? 'Hide' : 'Show'}</span>
+              </button>
+            </div>
           </Field>
           <Field
             error={errors.confirmPassword?.message}
             htmlFor="confirmPassword"
             label="Confirm password"
           >
-            <Input
-              autoComplete="new-password"
-              id="confirmPassword"
-              placeholder="Repeat password"
-              type="password"
-              {...register('confirmPassword')}
-            />
+            <div className="relative">
+              <Input
+                autoComplete="new-password"
+                className="pr-16"
+                id="confirmPassword"
+                placeholder="Repeat password"
+                type={showConfirmPassword ? 'text' : 'password'}
+                {...register('confirmPassword')}
+              />
+              <button
+                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                className="absolute inset-y-0 right-2 my-auto flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => setShowConfirmPassword((prev) => !prev)}
+                type="button"
+              >
+                {showConfirmPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+                <span>{showConfirmPassword ? 'Hide' : 'Show'}</span>
+              </button>
+            </div>
           </Field>
         </div>
         <p className="-mt-1 text-xs text-slate-500 dark:text-slate-400">

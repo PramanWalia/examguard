@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 
-import { Field, Input } from '../components/ui';
+import { EyeIcon, EyeOffIcon, Field, Input } from '../components/ui';
 import { InlineError } from '../components/States';
 import { useAuthStore } from '../store/authStore';
 import { getApiError, getFieldErrors } from '../utils/errors';
@@ -84,11 +84,13 @@ export const LoginPage = () => {
               {...register('password')}
             />
             <button
-              className="absolute inset-y-0 right-2 my-auto h-8 rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="absolute inset-y-0 right-2 my-auto flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
               onClick={() => setShowPassword((value) => !value)}
               type="button"
             >
-              {showPassword ? 'Hide' : 'Show'}
+              {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+              <span>{showPassword ? 'Hide' : 'Show'}</span>
             </button>
           </div>
         </Field>

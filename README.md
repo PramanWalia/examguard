@@ -190,18 +190,19 @@ npm run dev:client
 | [http://localhost:5173](http://localhost:5173) | 🌐 React app |
 | [http://localhost:5000/api/v1/health](http://localhost:5000/api/v1/health) | 💚 API health check |
 
-### 5. Try it Out
+### 5. Getting Started & User Accounts
 
-When you run `npm run seed` or set `SEED_ON_START=true` in development, the app comes pre-loaded with test data:
+ExamGuard enforces secure, production-ready authentication:
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@examguard.test` | `Admin1234` |
-| Teacher | `teacher1@examguard.test` | `Teacher1234` |
-| Student | `student1@examguard.test` | `Student1234` |
+* **New Users (Students & Teachers):** Navigate to the login screen and click **Create an account** (or visit `/register`) to set up a new personal account. Teachers can optionally provide an invite code or register for administrator approval.
+* **Administrator:** Create or update your system administrator using the secure CLI tool:
+  ```bash
+  ADMIN_EMAIL="admin@yourdomain.com" ADMIN_PASSWORD="YourStrongPassword1!" npm run create-admin --workspace @examguard/server
+  ```
+* **Private Demo Accounts:** For the repository owner, pre-configured demo and management credentials are stored in `PRIVATE_CREDENTIALS.md` (local only, protected by `.gitignore`).
 
 > [!NOTE]
-> These are **development-only** seed accounts. `SEED_ON_START` and `REPOSITORY_DRIVER=memory` are strictly refused when `NODE_ENV=production`.
+> Public demo credentials are never stored in production or repository documentation. Anyone else wanting to use the application must register their own account.
 
 ---
 

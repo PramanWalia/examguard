@@ -256,6 +256,7 @@ export const AdminUsersPage = () => {
                             >
                               <option value="student">Student</option>
                               <option value="teacher">Teacher</option>
+                              <option value="admin">Admin</option>
                             </Select>
                           )}
                         </td>
@@ -284,14 +285,19 @@ export const AdminUsersPage = () => {
                           <div className="flex items-center justify-end gap-2">
                             {isPendingTeacher && (
                               <button
-                                className="btn-secondary btn-sm"
-                                disabled={update.isPending || remove.isPending}
-                                onClick={() =>
-                                  update.mutate({ id: user.id, patch: { isActive: true } })
-                                }
+                                className="btn-sm rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:opacity-50"
+                                disabled={update.isPending}
+                                onClick={() => {
+                                  update.mutate(
+                                    { id: user.id, patch: { isActive: true } },
+                                    {
+                                      onSuccess: () => toast.success(`Teacher ${user.name} approved!`),
+                                    },
+                                  );
+                                }}
                                 type="button"
                               >
-                                Approve
+                                Approve Teacher
                               </button>
                             )}
                             {user.role !== 'admin' && (

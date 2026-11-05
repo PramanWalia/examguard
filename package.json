@@ -11,6 +11,7 @@
     "dev": "npm run dev --workspace @examguard/server",
     "dev:client": "npm run dev --workspace @examguard/client",
     "build": "npm run build --workspace @examguard/client",
+    "start": "npm run start --workspace @examguard/server",
     "lint": "npm run lint --workspaces",
     "format": "npm run format --workspaces",
     "test": "npm run test --workspace @examguard/server",

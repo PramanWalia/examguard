@@ -11,3 +11,5 @@ playwright-report/
 .vscode/
 .claude/
 .taste-skill/
+PRIVATE_CREDENTIALS.md
+.credentials.local.md

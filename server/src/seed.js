@@ -226,10 +226,14 @@ export const seedRepositories = async (
 
   const now = Date.now();
   const userCreatedAt = iso(now - 60 * DAY);
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin1234';
+  const teacherPassword = process.env.SEED_TEACHER_PASSWORD || 'Teacher1234';
+  const studentPassword = process.env.SEED_STUDENT_PASSWORD || 'Student1234';
+
   const hashes = {
-    admin: await bcrypt.hash('Admin1234', config.BCRYPT_ROUNDS),
-    teacher: await bcrypt.hash('Teacher1234', config.BCRYPT_ROUNDS),
-    student: await bcrypt.hash('Student1234', config.BCRYPT_ROUNDS),
+    admin: await bcrypt.hash(adminPassword, config.BCRYPT_ROUNDS),
+    teacher: await bcrypt.hash(teacherPassword, config.BCRYPT_ROUNDS),
+    student: await bcrypt.hash(studentPassword, config.BCRYPT_ROUNDS),
   };
 
   await repos.userRepo.create({
@@ -334,9 +338,9 @@ export const seedRepositories = async (
   return {
     seeded: true,
     accounts: [
-      'admin@examguard.test / Admin1234',
-      'teacher1@examguard.test / Teacher1234',
-      'student1@examguard.test and student2@examguard.test / Student1234',
+      `admin@examguard.test / ${adminPassword}`,
+      `teacher1@examguard.test / ${teacherPassword}`,
+      `student1@examguard.test and student2@examguard.test / ${studentPassword}`,
     ],
   };
 };

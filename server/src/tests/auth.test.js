@@ -32,16 +32,17 @@ describe('auth', () => {
       .post('/api/v1/auth/register')
       .send({ name: 'Priya Sharma', email: 'priya@example.com', password: 'Passw0rd!', role: 'teacher' });
     expect(response.status).toBe(201);
+    expect(response.body.data.pendingApproval).toBe(true);
     expect(response.body.data.user.role).toBe('teacher');
     expect(response.body.data.user.isActive).toBe(false);
     expect(response.body.data.user.approvalStatus).toBe('pending');
-    expect(response.body.data.pendingApproval).toBe(true);
     expect(response.body.data.accessToken).toBeNull();
 
     const blockedLogin = await request(app)
       .post('/api/v1/auth/login')
       .send({ email: 'priya@example.com', password: 'Passw0rd!' });
     expect(blockedLogin.status).toBe(401);
+    expect(blockedLogin.body.error.message).toContain('pending administrator approval');
 
     await createUser(repos, { name: 'Admin', email: 'admin@example.com', role: 'admin' });
     const adminToken = await login(app, 'admin@example.com', 'Passw0rd!');
@@ -52,11 +53,11 @@ describe('auth', () => {
     expect(approve.status).toBe(200);
     expect(approve.body.data.isActive).toBe(true);
     expect(approve.body.data.approvalStatus).toBe('approved');
-
     const activeLogin = await request(app)
       .post('/api/v1/auth/login')
       .send({ email: 'priya@example.com', password: 'Passw0rd!' });
     expect(activeLogin.status).toBe(200);
+    expect(activeLogin.body.data.user.role).toBe('teacher');
   });
 
   it('registers a teacher with a valid inviteCode as immediately active and rejects an invalid inviteCode', async () => {
