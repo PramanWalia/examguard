@@ -28,7 +28,12 @@ export const createApp = ({ repos = createRepositoryFactory() } = {}) => {
   app.use(
     cors({
       origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+        if (!origin) return callback(null, true);
+        const cleanOrigin = origin.replace(/\/+$/, '');
+        const isAllowed =
+          allowedOrigins.includes(cleanOrigin) ||
+          cleanOrigin.endsWith('.vercel.app');
+        if (isAllowed) return callback(null, true);
         return callback(new AppError(403, 'FORBIDDEN', 'Origin not allowed.'));
       },
       credentials: true,
