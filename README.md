@@ -6,16 +6,14 @@
 
 Built with React · Express · MongoDB
 
-[![Live Frontend](https://img.shields.io/badge/Live_App-examguard--plum.vercel.app-blue?style=flat&logo=vercel)](https://examguard-plum.vercel.app)
-[![API Status](https://img.shields.io/badge/API_Status-Online-success?style=flat&logo=railway)](https://examguard-production-2ebb.up.railway.app/api/v1/health)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-examguard--plum.vercel.app-blue?style=flat&logo=vercel)](https://examguard-plum.vercel.app)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7%2B-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**🌐 Live Application:** [https://examguard-plum.vercel.app](https://examguard-plum.vercel.app)  
-**💚 API Health Check:** [https://examguard-production-2ebb.up.railway.app/api/v1/health](https://examguard-production-2ebb.up.railway.app/api/v1/health)
+**🌐 Live Demo:** [https://examguard-plum.vercel.app](https://examguard-plum.vercel.app)
 
 </div>
 
@@ -200,58 +198,45 @@ npm run dev:client
 ExamGuard enforces secure, production-ready authentication:
 
 * **New Users (Students & Teachers):** Navigate to the login screen and click **Create an account** (or visit `/register`) to set up a new personal account.
-* **Teacher Approval Flow:** Teachers can optionally provide an invite code or submit their account for administrator activation. Unapproved teachers cannot access questions or exams until an admin approves them.
-* **Administrator Role & Protection:** System administrators oversee the platform from the `/users` console:
-  - Approve or decline pending teacher accounts.
-  - Safely switch existing accounts between **Student** and **Teacher** roles (the administrator role is strictly protected and cannot be assigned via the dropdown).
-  - Provision or update an administrator account using environment variables (`ADMIN_EMAIL` and `ADMIN_PASSWORD`) or the CLI tool:
-    ```bash
-    ADMIN_EMAIL="admin@yourdomain.com" ADMIN_PASSWORD="YourStrongPassword1!" npm run create-admin --workspace @examguard/server
-    ```
-* **Private Demo Accounts:** For the repository owner, pre-configured demo and management credentials are stored in `PRIVATE_CREDENTIALS.md` (local only, protected by `.gitignore`).
-
-> [!NOTE]
-> Public demo credentials are never stored in production or repository documentation. Anyone wanting to use the application must register their own account.
+* **Teacher Approval Flow:** Teachers can optionally provide an institution invite code or submit their account for administrator verification. Unapproved teacher accounts remain pending and cannot create questions or publish exams until verified.
+* **Role Governance:** System administrators oversee platform membership from the Users console:
+  - Review and approve pending teacher registrations.
+  - Activate or deactivate user access with one click.
+  - Switch existing user roles between **Student** and **Teacher** (the system administrator role is strictly protected and non-assignable via client controls).
 
 ---
 
-## ☁️ Production Cloud Deployment
+## ☁️ Production Architecture
 
-ExamGuard is live and deployed with automated GitHub CI/CD:
+ExamGuard is deployed live with automated continuous integration & continuous delivery (CI/CD):
 
-| Component | Platform | Live URL / Target | Notes |
+| Layer | Platform | Architecture | Description |
 |---|---|---|---|
-| **Frontend UI** | [Vercel](https://vercel.com/) | [https://examguard-plum.vercel.app](https://examguard-plum.vercel.app) | React 18 + Vite SPA, auto-proxies `/api` via `vercel.json` |
-| **Backend API** | [Railway](https://railway.app/) | [https://examguard-production-2ebb.up.railway.app](https://examguard-production-2ebb.up.railway.app) | Node.js + Express REST API, CORS & Helmet hardened |
-| **Database** | [Railway MongoDB](https://railway.app/) | `mongodb-volume` | Persistent cloud volume storage |
+| **Web Application** | [Vercel](https://vercel.com/) | [https://examguard-plum.vercel.app](https://examguard-plum.vercel.app) | React 18 + Vite SPA served via global edge CDN |
+| **API Service** | Containerized Cloud Service | Express REST API | Secure proxy integration with Helmet, CORS, and rate limiting |
+| **Database** | Managed MongoDB | Persistent Volume Storage | Encrypted, isolated production data store |
 
 ### Continuous Deployment (CI/CD)
-Both Vercel and Railway automatically deploy whenever code is pushed to the `main` branch of this repository:
+The platform continuously deploys updates upon merging to the `main` branch:
 ```text
-Local commit ➔ git push origin main ➔ Vercel (Frontend) & Railway (Backend) auto-redeploy in ~30s
+Commit to main ➔ Automated Build & Verification ➔ Live Production Updated
 ```
 
 ---
 
 ## 🗄️ Using MongoDB
 
-For persistent data (required in production), switch to MongoDB:
+For persistent storage (required in production), configure your MongoDB connection:
 
 ```dotenv
-# In server/.env, change these:
+# In server/.env:
 REPOSITORY_DRIVER=mongo
 MONGODB_URI=mongodb://127.0.0.1:27017/examguard
 SEED_ON_START=false
 ```
 
-Then create an admin account manually (or configure `ADMIN_EMAIL` & `ADMIN_PASSWORD` in your cloud variables):
-
-```bash
-ADMIN_EMAIL="your@email.com" ADMIN_PASSWORD="YourStrongPassword1" npm run create-admin --workspace @examguard/server
-```
-
 > [!IMPORTANT]
-> For production, you **must** set unique, strong `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values (64-character hex strings). The app will refuse to start with the development defaults when `NODE_ENV=production`.
+> For production environments, unique, high-entropy `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values (64-character hex strings) must be configured. Default development secrets are strictly rejected when `NODE_ENV=production`.
 
 ---
 

@@ -24,7 +24,7 @@ Production deployments (`NODE_ENV=production`) enforce:
 
 ### Account provisioning
 
-Demo accounts and demo exams are disabled by default (`SEED_ON_START=false`) and strictly refused in production. Administrators are provisioned separately with `npm run create-admin --workspace server`. Set `SEED_ON_START=true` only for isolated local development environments that intentionally need demo fixtures.
+Demo accounts and demo exams are disabled by default (`SEED_ON_START=false`) and strictly refused in production. Administrators are provisioned securely through dedicated environment configuration. Set `SEED_ON_START=true` only for isolated local development environments that intentionally need demo fixtures.
 
 Teacher self-registration requires either:
 1. A valid faculty invite code matching `TEACHER_INVITE_CODE`, which activates the teacher account immediately, or
