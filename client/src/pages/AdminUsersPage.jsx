@@ -239,7 +239,7 @@ export const AdminUsersPage = () => {
                           </div>
                         </td>
                         <td>
-                          {isSelf ? (
+                          {isSelf || user.role === 'admin' ? (
                             <Badge tone="brand">admin</Badge>
                           ) : (
                             <Select
@@ -256,7 +256,6 @@ export const AdminUsersPage = () => {
                             >
                               <option value="student">Student</option>
                               <option value="teacher">Teacher</option>
-                              <option value="admin">Admin</option>
                             </Select>
                           )}
                         </td>
